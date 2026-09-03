@@ -35,18 +35,18 @@ pub const DNA = struct {
     }
 
     fn reverseComplement(allocator: std.mem.Allocator, forward: []const u8) ![]const u8 {
-    var revcomp = try allocator.alloc(u8, forward.len);
-    var i = forward.len;
-    while (i > 0) : (i -= 1) {
-        var newchar: u8 = undefined;
-        switch (forward[i-1]) {
-            'A' => newchar = 'T',
-            'C' => newchar = 'G',
-            'G' => newchar = 'C',
-            'T' => newchar = 'A',
-            else => newchar = '?',
-        }
-        revcomp[forward.len - i] = newchar;
+        var revcomp = try allocator.alloc(u8, forward.len);
+        var i = forward.len;
+        while (i > 0) : (i -= 1) {
+            var newchar: u8 = undefined;
+            switch (forward[i-1]) {
+                'A' => newchar = 'T',
+                'C' => newchar = 'G',
+                'G' => newchar = 'C',
+                'T' => newchar = 'A',
+                else => newchar = '?',
+            }
+            revcomp[forward.len - i] = newchar;
         }
     return revcomp;
     }
@@ -159,7 +159,12 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
 });
 
 
-pub fn readFasta(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
+pub fn parse(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    queue: *std.Io.Queue(Fasta),
+    file: std.Io.File
+) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
