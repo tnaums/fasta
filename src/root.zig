@@ -17,20 +17,20 @@ test "basic add functionality" {
     try std.testing.expect(add(3, 7) == 10);
 }
 
+pub const biomolecule = enum { protein, dna };
 
 pub const DNA = struct {
     fasta: *Fasta,
     complement: []const u8,
 
-    pub fn init(fasta: *Fasta) !DNA {
+    pub fn init(fasta: *Fasta, allocator: std.mem.Allocator) !DNA {
         return .{
             .fasta = fasta,
-            .complement = try DNA.reverseComplement(fasta.allocator, fasta.sequence),
+            .complement = try DNA.reverseComplement(allocator, fasta.sequence),
         };
     }
 
-    pub fn deinit(self: DNA) void {
-        const allocator = self.fasta.allocator;
+    pub fn deinit(self: DNA, allocator: std.mem.Allocator) void {
         allocator.free(self.complement);
     }
 
@@ -89,7 +89,6 @@ pub const Protein = struct {
 pub const Fasta = struct {
     header: []u8,
     sequence: []u8,
-    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Fasta {
         const h = try allocator.dupe(u8, header);
@@ -101,12 +100,10 @@ pub const Fasta = struct {
         return .{
             .header = h,
             .sequence = s,
-            .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: Fasta) void {
-        const allocator = self.allocator;
+    pub fn deinit(self: Fasta, allocator: std.mem.Allocator) void {
         allocator.free(self.sequence);
         allocator.free(self.header);
     }

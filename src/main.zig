@@ -1,7 +1,7 @@
 const std = @import("std");
 const fasta = @import("root.zig");
 
-const biomolecule = enum { protein, dna };
+
 
 pub fn main(init: std.process.Init) !void {
     var queue: std.Io.Queue(fasta.Fasta) = .init(&.{});
@@ -13,8 +13,8 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    var bmtype: biomolecule = undefined;
-    if (std.meta.stringToEnum(biomolecule, args[1])) |value| {
+    var bmtype: fasta.biomolecule = undefined;
+    if (std.meta.stringToEnum(fasta.biomolecule, args[1])) |value| {
         bmtype = value;
     } else {
         std.debug.print("No biomolecule type '{s}'\n", .{args[1]});
@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
             error.Closed => break,
             error.Canceled => return,
         };
-        defer myFasta.deinit();
+        defer myFasta.deinit(init.gpa);
         counter += 1;
 
         switch (bmtype) {
@@ -45,39 +45,67 @@ pub fn main(init: std.process.Init) !void {
                 const p = try fasta.Protein.init(&myFasta);
 
                 try stdout.writeStreamingAll(init.io, "---------\n");
-                const hprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", p.fasta.header });
+                const hprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "{s:>9} {s}\n",
+                    .{ "header:", p.fasta.header }
+                );
                 defer init.gpa.free(hprint);
                 try stdout.writeStreamingAll(init.io, hprint);
 
-                const sprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{p.fasta.sequence});
+                const sprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "sequence: {s}\n",
+                    .{p.fasta.sequence}
+                );
                 defer init.gpa.free(sprint);
                 try stdout.writeStreamingAll(init.io, sprint);
 
-                const massprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{p.mass});
+                const massprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "mass: {d:>0.2}\n",
+                    .{p.mass}
+                );
                 defer init.gpa.free(massprint);
                 try stdout.writeStreamingAll(init.io, massprint);
             },
             .dna => {
-                const d = try fasta.DNA.init(&myFasta);
-                defer d.deinit();
+                const d = try fasta.DNA.init(&myFasta, init.gpa);
+                defer d.deinit(init.gpa);
 
                 try stdout.writeStreamingAll(init.io, "---------\n");
-                const hprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", d.fasta.header });
+                const hprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "{s:>9} {s}\n",
+                    .{ "header:", d.fasta.header }
+                );
                 defer init.gpa.free(hprint);
                 try stdout.writeStreamingAll(init.io, hprint);
 
-                const sprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{d.fasta.sequence});
+                const sprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "sequence: {s}\n",
+                    .{d.fasta.sequence}
+                );
                 defer init.gpa.free(sprint);
                 try stdout.writeStreamingAll(init.io, sprint);
 
-                const revprint = try std.fmt.allocPrint(init.gpa, "revcomp: {s}\n", .{d.complement});
+                const revprint = try std.fmt.allocPrint(
+                    init.gpa,
+                    "revcomp: {s}\n",
+                    .{d.complement}
+                );
                 defer init.gpa.free(revprint);
                 try stdout.writeStreamingAll(init.io, revprint);
             },
         }
     }
 
-    const finalTally = try std.fmt.allocPrint(init.gpa, "Created {d} Fasta objects\n", .{counter});
+    const finalTally = try std.fmt.allocPrint(
+        init.gpa,
+        "Created {d} Fasta objects\n",
+        .{counter}
+    );
     defer init.gpa.free(finalTally);
     try stdout.writeStreamingAll(init.io, finalTally);
 }
