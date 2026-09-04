@@ -26,12 +26,14 @@ pub fn main(init: std.process.Init) !void {
     defer file.close(init.io);
 
     var producer_task = try init.io.concurrent(
-        fasta.parse,
+        fasta.parse3,
         .{ init.io, init.gpa, &queue, file }
     );
     defer producer_task.cancel(init.io) catch {};
     var counter: u16 = 0;
 
+    const t_start = std.Io.Timestamp.now(init.io, .awake);
+    
     while (true) {
         var myFasta = queue.getOne(init.io) catch |err| switch (err) {
             error.Closed => break,
@@ -101,6 +103,17 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    // const elapsed: u64 =
+    //     @intCast(t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).milliseconds);
+    const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
+    const elapsedPrint = try std.fmt.allocPrint(
+        init.gpa,
+        "elapsed time: {d} mS\n",
+        .{elapsed}
+    );
+    defer init.gpa.free(elapsedPrint);
+    try stdout.writeStreamingAll(init.io, elapsedPrint);
+    
     const finalTally = try std.fmt.allocPrint(
         init.gpa,
         "Created {d} Fasta objects\n",
