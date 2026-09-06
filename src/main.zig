@@ -42,26 +42,26 @@ pub fn main(init: std.process.Init) !void {
         defer myFasta.deinit(init.gpa);
         counter += 1;
 
+        try stdout.writeStreamingAll(init.io, "---------\n");
+        const hprint = try std.fmt.allocPrint(
+            init.gpa,
+            "{s:>9} {s}\n",
+            .{ "header:", myFasta.header }
+        );
+        defer init.gpa.free(hprint);
+        try stdout.writeStreamingAll(init.io, hprint);
+
+        const sprint = try std.fmt.allocPrint(
+            init.gpa,
+            "sequence: {s}\n",
+            .{myFasta.sequence}
+        );
+        defer init.gpa.free(sprint);
+        try stdout.writeStreamingAll(init.io, sprint);
+        
         switch (bmtype) {
             .protein => {
                 const p = try fasta.Protein.init(&myFasta);
-
-                try stdout.writeStreamingAll(init.io, "---------\n");
-                const hprint = try std.fmt.allocPrint(
-                    init.gpa,
-                    "{s:>9} {s}\n",
-                    .{ "header:", p.fasta.header }
-                );
-                defer init.gpa.free(hprint);
-                try stdout.writeStreamingAll(init.io, hprint);
-
-                const sprint = try std.fmt.allocPrint(
-                    init.gpa,
-                    "sequence: {s}\n",
-                    .{p.fasta.sequence}
-                );
-                defer init.gpa.free(sprint);
-                try stdout.writeStreamingAll(init.io, sprint);
 
                 const massprint = try std.fmt.allocPrint(
                     init.gpa,
@@ -74,23 +74,6 @@ pub fn main(init: std.process.Init) !void {
             .dna => {
                 const d = try fasta.DNA.init(&myFasta, init.gpa);
                 defer d.deinit(init.gpa);
-
-                try stdout.writeStreamingAll(init.io, "---------\n");
-                const hprint = try std.fmt.allocPrint(
-                    init.gpa,
-                    "{s:>9} {s}\n",
-                    .{ "header:", d.fasta.header }
-                );
-                defer init.gpa.free(hprint);
-                try stdout.writeStreamingAll(init.io, hprint);
-
-                const sprint = try std.fmt.allocPrint(
-                    init.gpa,
-                    "sequence: {s}\n",
-                    .{d.fasta.sequence}
-                );
-                defer init.gpa.free(sprint);
-                try stdout.writeStreamingAll(init.io, sprint);
 
                 const revprint = try std.fmt.allocPrint(
                     init.gpa,

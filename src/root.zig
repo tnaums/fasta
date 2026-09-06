@@ -18,6 +18,10 @@ test "basic add functionality" {
 }
 
 pub const biomolecule = enum { protein, dna };
+pub const Biomolecule = union(biomolecule) {
+    protein: Protein,
+    dna: DNA,
+};
 
 pub const DNA = struct {
     fasta: *Fasta,
@@ -251,7 +255,7 @@ pub fn parse2(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fas
     try queue.putOne(io, f);
 }
 
-pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
+pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File, dorp: biomolecule) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
@@ -286,7 +290,16 @@ pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fast
                 .inSequence => {
                     if (byte[0] == '>') {
                         const f: Fasta = try .init(allocator, header.items, sequence.items);
-                        try queue.putOne(io, f);
+                        var forqueue: Biomolecule = undefined;
+                        switch (dorp) {
+                            .dna => {
+                                forqueue = Biomolecule{ .dna = try DNA.init(&f) };
+                            },
+                            .protein => {
+                                forqueue = Biomolecule{ .protein = try Protein.init(&f) };                                
+                            },
+                        }
+                        try queue.putOne(io, forqueue);
                         sequence.clearRetainingCapacity();
                         header.clearRetainingCapacity();
                         myState = state.inHeader;
