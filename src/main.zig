@@ -2,7 +2,6 @@ const std = @import("std");
 const fasta = @import("root.zig");
 
 pub fn main(init: std.process.Init) !void {
-    var queue: std.Io.Queue(fasta.Fasta) = .init(&.{});
     const stdout = std.Io.File.stdout();
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -23,73 +22,26 @@ pub fn main(init: std.process.Init) !void {
     const file = try std.Io.Dir.cwd().openFile(init.io, filepath, .{});
     defer file.close(init.io);
 
-    var producer_task = try init.io.concurrent(fasta.parse3, .{ init.io, init.gpa, &queue, file });
-    defer producer_task.cancel(init.io) catch {};
     var counter: u16 = 0;
-    
-    const t_start = std.Io.Timestamp.now(init.io, .awake);
-
-    while (true) {
-        var myFasta = queue.getOne(init.io) catch |err| switch (err) {
-            error.Closed => break,
-            error.Canceled => return,
-        };
-        defer myFasta.deinit(init.gpa);
-        counter += 1;
-
-        try stdout.writeStreamingAll(init.io, "---------\n");
-        const hprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myFasta.header });
-        defer init.gpa.free(hprint);
-        try stdout.writeStreamingAll(init.io, hprint);
-
-        const sprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myFasta.sequence});
-        defer init.gpa.free(sprint);
-        try stdout.writeStreamingAll(init.io, sprint);
-
-        switch (bmtype) {
-            .protein => {
-                const p = try fasta.Protein.init(&myFasta);
-
-                const massprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{p.mass});
-                defer init.gpa.free(massprint);
-                try stdout.writeStreamingAll(init.io, massprint);
-            },
-            .dna => {
-                const d = try fasta.DNA.init(&myFasta, init.gpa);
-                defer d.deinit(init.gpa);
-
-                const revprint = try std.fmt.allocPrint(init.gpa, "revcomp: {s}\n", .{d.complement});
-                defer init.gpa.free(revprint);
-                try stdout.writeStreamingAll(init.io, revprint);
-            },
-        }
-    }
-
-    const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
-    const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
-    defer init.gpa.free(elapsedPrint);
-    try stdout.writeStreamingAll(init.io, elapsedPrint);
-
-    const finalTally = try std.fmt.allocPrint(init.gpa, "Created {d} Fasta objects\n", .{counter});
-    defer init.gpa.free(finalTally);
-    try stdout.writeStreamingAll(init.io, finalTally);
 
     // Starting protein queue
-    var queueNew: std.Io.Queue(fasta.Protein2) = .init(&.{});
+    var queueNew: std.Io.Queue(fasta.Protein) = .init(&.{});
 
-    const fileNew = try std.Io.Dir.cwd().openFile(init.io, "sequences/truncated.pep", .{});
+    const fileNew = try std.Io.Dir.cwd().openFile(init.io, filepath, .{});
     defer fileNew.close(init.io);
 
-    var producer_taskNew = try init.io.concurrent(fasta.parse4, .{ init.io, init.gpa, &queueNew, fileNew });
-    defer producer_taskNew.cancel(init.io) catch {};    
+    var producer_taskNew = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queueNew, fileNew });
+    defer producer_taskNew.cancel(init.io) catch {};
 
+    const t_start = std.Io.Timestamp.now(init.io, .awake);
     while (true) {
         var myProtein = queueNew.getOne(init.io) catch |err| switch (err) {
             error.Closed => break,
             error.Canceled => return,
         };
         defer myProtein.deinit(init.gpa);
-
+        counter += 1;
+        
         try stdout.writeStreamingAll(init.io, "---------\n");
         const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myProtein.header });
         defer init.gpa.free(hdprint);
@@ -103,6 +55,12 @@ pub fn main(init: std.process.Init) !void {
         defer init.gpa.free(massNewprint);
         try stdout.writeStreamingAll(init.io, massNewprint);
     }
+    const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
+    const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
+    defer init.gpa.free(elapsedPrint);
+    try stdout.writeStreamingAll(init.io, elapsedPrint);
+
+    const finalTally = try std.fmt.allocPrint(init.gpa, "Created {d} Fasta objects\n", .{counter});
+    defer init.gpa.free(finalTally);
+    try stdout.writeStreamingAll(init.io, finalTally);
 }
-
-

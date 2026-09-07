@@ -20,18 +20,28 @@ test "basic add functionality" {
 pub const biomolecule = enum { protein, dna };
 
 pub const DNA = struct {
-    fasta: *Fasta,
+    header: []const u8,
+    sequence: []const u8,
     complement: []const u8,
 
-    pub fn init(fasta: *Fasta, allocator: std.mem.Allocator) !DNA {
+    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !DNA {
+        const h = try allocator.dupe(u8, header);
+        errdefer allocator.free(h);
+
+        const s = try allocator.dupe(u8, sequence);
+        errdefer allocator.free(s);
+
         return .{
-            .fasta = fasta,
-            .complement = try DNA.reverseComplement(allocator, fasta.sequence),
+            .header = h,
+            .sequence = s,
+            .complement = try DNA.reverseComplement(allocator, sequence),
         };
     }
 
     pub fn deinit(self: DNA, allocator: std.mem.Allocator) void {
         allocator.free(self.complement);
+        allocator.free(self.sequence);
+        allocator.free(self.header);
     }
 
     fn reverseComplement(allocator: std.mem.Allocator, forward: []const u8) ![]const u8 {
@@ -52,46 +62,12 @@ pub const DNA = struct {
     }
 };
 
-
 pub const Protein = struct {
-    fasta: *Fasta,
+    header: []const u8,
+    sequence: []const u8,
     mass: f32,
 
-    pub fn init(fasta: *Fasta) !Protein {
-        return .{
-            .fasta = fasta,
-            .mass = calculateMass(fasta.sequence),
-        };
-    }
-
-    // pub fn deinit(self: Protein) void {
-    //     const allocator = self.fasta.allocator;
-    //     allocator.destroy(self);
-    // }
-
-    fn calculateMass(sequence: []const u8) f32 {
-        var mass: f32 = 18.0;
-        for (sequence) |aa| {
-            const k = std.meta.stringToEnum(AminoAcid, &[_]u8{aa});
-            if (k) |key| {
-                mass += massMap.get(key);
-            } else if (aa == '*') {
-                return mass / 1000; // stop codon, we are done
-            } else {
-                return 0.0; // something went wrong
-            }
-        }
-
-        return mass / 1000;
-    }
-};
-
-pub const Protein2 = struct {
-    header: []u8,
-    sequence: []u8,
-    mass: f32,
-
-    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Protein2 {
+    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Protein {
         const h = try allocator.dupe(u8, header);
         errdefer allocator.free(h);
 
@@ -105,7 +81,7 @@ pub const Protein2 = struct {
         };
     }
 
-    pub fn deinit(self: Protein2, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: Protein, allocator: std.mem.Allocator) void {
         allocator.free(self.sequence);
         allocator.free(self.header);
     }
@@ -125,30 +101,6 @@ pub const Protein2 = struct {
 
         return mass / 1000;
     }    
-};
-
-
-pub const Fasta = struct {
-    header: []u8,
-    sequence: []u8,
-
-    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Fasta {
-        const h = try allocator.dupe(u8, header);
-        errdefer allocator.free(h);
-
-        const s = try allocator.dupe(u8, sequence);
-        errdefer allocator.free(s);
-
-        return .{
-            .header = h,
-            .sequence = s,
-        };
-    }
-
-    pub fn deinit(self: Fasta, allocator: std.mem.Allocator) void {
-        allocator.free(self.sequence);
-        allocator.free(self.header);
-    }
 };
 
 const AminoAcid = enum {
@@ -201,7 +153,66 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
 // Uses a small buffer; is much faster than using a single byte buffer, but after about 8 bytes, it seems to
 // stay the same. Not slower than using parse2 which reads lines with takeDelimiter. How does
 // file.readStreaming differ from reader.interface.takeDelimiter('\n')?
-pub fn parse3(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
+// pub fn parse3(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
+//     const state = enum { inHeader, inSequence };
+//     var myState: ?state = null;
+
+//     var header = std.ArrayList(u8).empty;
+//     defer header.deinit(allocator);
+
+//     var sequence = std.ArrayList(u8).empty;
+//     defer sequence.deinit(allocator);
+
+//     defer queue.close(io);
+
+//     while (true) {
+//         var buf: [16]u8 = undefined;
+//         const n = file.readStreaming(io, &.{&buf}) catch |err| {
+//             if (err == error.EndOfStream) break;
+//             return err;
+//         };
+//         if (n == 0) {
+//             if (header.items.len == 0) return;
+//             break;
+//         }
+//         var i: u16 = 0;
+//         while (i < n) : (i += 1) {
+//             if (myState) |s| {
+//                 switch (s) {
+//                     .inHeader => {
+//                         if (buf[i] == '\n') {
+//                             myState = state.inSequence;
+//                             continue;
+//                         }
+//                         try header.append(allocator, buf[i]);
+//                     },
+//                     .inSequence => {
+//                         if (buf[i] == '>') {
+//                             const f: Fasta = try .init(allocator, header.items, sequence.items);
+//                             try queue.putOne(io, f);
+//                             sequence.clearRetainingCapacity();
+//                             header.clearRetainingCapacity();
+//                             myState = state.inHeader;
+//                             continue;
+//                         }
+//                         if (buf[i] != '\n') {
+//                             try sequence.append(allocator, std.ascii.toUpper(buf[i]));
+//                         }
+//                     },
+//                 }
+//             } else {
+//                 if (buf[i] == '>') {
+//                     myState = state.inHeader;
+//                     continue;
+//                 }
+//             }
+//         }
+//     }
+//     const f = try Fasta.init(allocator, header.items, sequence.items);
+//     try queue.putOne(io, f);
+// }
+
+pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein), file: std.Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
@@ -236,66 +247,7 @@ pub fn parse3(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fas
                     },
                     .inSequence => {
                         if (buf[i] == '>') {
-                            const f: Fasta = try .init(allocator, header.items, sequence.items);
-                            try queue.putOne(io, f);
-                            sequence.clearRetainingCapacity();
-                            header.clearRetainingCapacity();
-                            myState = state.inHeader;
-                            continue;
-                        }
-                        if (buf[i] != '\n') {
-                            try sequence.append(allocator, std.ascii.toUpper(buf[i]));
-                        }
-                    },
-                }
-            } else {
-                if (buf[i] == '>') {
-                    myState = state.inHeader;
-                    continue;
-                }
-            }
-        }
-    }
-    const f = try Fasta.init(allocator, header.items, sequence.items);
-    try queue.putOne(io, f);
-}
-
-pub fn parse4(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein2), file: std.Io.File) !void {
-    const state = enum { inHeader, inSequence };
-    var myState: ?state = null;
-
-    var header = std.ArrayList(u8).empty;
-    defer header.deinit(allocator);
-
-    var sequence = std.ArrayList(u8).empty;
-    defer sequence.deinit(allocator);
-
-    defer queue.close(io);
-
-    while (true) {
-        var buf: [16]u8 = undefined;
-        const n = file.readStreaming(io, &.{&buf}) catch |err| {
-            if (err == error.EndOfStream) break;
-            return err;
-        };
-        if (n == 0) {
-            if (header.items.len == 0) return;
-            break;
-        }
-        var i: u16 = 0;
-        while (i < n) : (i += 1) {
-            if (myState) |s| {
-                switch (s) {
-                    .inHeader => {
-                        if (buf[i] == '\n') {
-                            myState = state.inSequence;
-                            continue;
-                        }
-                        try header.append(allocator, buf[i]);
-                    },
-                    .inSequence => {
-                        if (buf[i] == '>') {
-                            const p: Protein2 = try .init(allocator, header.items, sequence.items);
+                            const p: Protein = try .init(allocator, header.items, sequence.items);
                             try queue.putOne(io, p);
                             sequence.clearRetainingCapacity();
                             header.clearRetainingCapacity();
@@ -315,107 +267,16 @@ pub fn parse4(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Pro
             }
         }
     }
-    const p = try Protein2.init(allocator, header.items, sequence.items);
+    const p = try Protein.init(allocator, header.items, sequence.items);
     try queue.putOne(io, p);
 }
 
-pub fn parse2(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
-    var header: std.ArrayList(u8) = .empty;
-    defer header.deinit(allocator);
-    var sequence: std.ArrayList(u8) = .empty;
-    defer sequence.deinit(allocator);
-    var startFlag: bool = true;
-    defer queue.close(io);
-
-    var buf: [100]u8 = undefined; // must be big enough for longest line
-    var reader: std.Io.File.Reader = file.reader(io, &buf);
-
-    // Fasta parser, putting each Fasta struct into the queue
-    while (try reader.interface.takeDelimiter('\n')) |line| {
-        if (line.len == 0) {
-            continue;
-        }
-        if (line[0] == '>') {
-            if (!startFlag) {
-                const f: Fasta = try .init(allocator, header.items, sequence.items);
-                try queue.putOne(io, f);
-                sequence.clearRetainingCapacity();
-                header.clearRetainingCapacity();
-            }
-            try header.appendSlice(allocator, line);
-            startFlag = false;
-        } else {
-            try sequence.appendSlice(allocator, line);
-        }
-    }
-
-    const f: Fasta = try .init(allocator, header.items, sequence.items);
-    try queue.putOne(io, f);
-}
-
-pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
-    const state = enum { inHeader, inSequence };
-    var myState: ?state = null;
-
-    var header = std.ArrayList(u8).empty;
-    defer header.deinit(allocator);
-
-    var sequence = std.ArrayList(u8).empty;
-    defer sequence.deinit(allocator);
-
-    defer queue.close(io);
-
-    while (true) {
-        var byte: [1]u8 = undefined;
-        const amt = file.readStreaming(io, &.{&byte}) catch |err| {
-            if (err == error.EndOfStream) break;
-            return err;
-        };
-        if (amt == 0) {
-            if (header.items.len == 0) return;
-            break;
-        }
-
-        if (myState) |s| {
-            switch (s) {
-                .inHeader => {
-                    if (byte[0] == '\n') {
-                        myState = state.inSequence;
-                        continue;
-                    }
-                    try header.append(allocator, byte[0]);
-                },
-                .inSequence => {
-                    if (byte[0] == '>') {
-                        const f: Fasta = try .init(allocator, header.items, sequence.items);
-                        try queue.putOne(io, f);
-                        sequence.clearRetainingCapacity();
-                        header.clearRetainingCapacity();
-                        myState = state.inHeader;
-                        continue;
-                    }
-                    if (byte[0] != '\n') {
-                        try sequence.append(allocator, std.ascii.toUpper(byte[0]));
-                    }
-                },
-            }
-        } else {
-            if (byte[0] == '>') {
-                myState = state.inHeader;
-                continue;
-            }
-        }
-    }
-    const f = try Fasta.init(allocator, header.items, sequence.items);
-    try queue.putOne(io, f);    
-}
-
-pub fn fastaConsumer(
-    io: std.Io,
-    queue: *std.Io.Queue(Fasta),
-) !Fasta {
-    const value = queue.getOne(io) catch |err| {
-        return err;
-    };
-    return value;
-}
+// pub fn fastaConsumer(
+//     io: std.Io,
+//     queue: *std.Io.Queue(Fasta),
+// ) !Fasta {
+//     const value = queue.getOne(io) catch |err| {
+//         return err;
+//     };
+//     return value;
+// }
