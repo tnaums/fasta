@@ -18,33 +18,6 @@ test "basic add functionality" {
 }
 
 pub const biomolecule = enum { protein, dna };
-pub const Biomolecule = union(biomolecule) {
-    protein: Protein2,
-    dna: DNA2,
-
-    fn init(
-        allocator: std.mem.Allocator,
-        header: []u8,
-        sequence: []u8,
-        dorp: biomolecule,
-    ) !Biomolecule {
-        switch (dorp) {
-            .protein => {
-                return Biomolecule{ .protein = Protein2.init(allocator, header, sequence) };
-            },
-            .dna => {
-
-            }
-        }
-    }
-
-    fn deinit(
-        self: Biomolecule,
-        allocator: std.mem.Allocator,
-    ) void {
-        
-    }
-};
 
 pub const DNA = struct {
     fasta: *Fasta,
@@ -79,38 +52,6 @@ pub const DNA = struct {
     }
 };
 
-pub const Protein2 = struct {
-    fasta: *Fasta,
-    mass: f32,
-
-    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Protein {
-        const fasta = try Fasta.init(allocator, header, sequence);
-        return .{
-            .fasta = &fasta,
-            .mass = calculateMass(fasta.sequence),
-        };
-    }
-
-    pub fn deinit(self: Protein2, allocator: std.mem.Allocator) void {
-        self.fasta.deinit(allocator);
-    }
-
-    fn calculateMass(sequence: []const u8) f32 {
-        var mass: f32 = 18.0;
-        for (sequence) |aa| {
-            const k = std.meta.stringToEnum(AminoAcid, &[_]u8{aa});
-            if (k) |key| {
-                mass += massMap.get(key);
-            } else if (aa == '*') {
-                return mass / 1000; // stop codon, we are done
-            } else {
-                return 0.0; // something went wrong
-            }
-        }
-
-        return mass / 1000;
-    }
-};
 
 pub const Protein = struct {
     fasta: *Fasta,
@@ -144,6 +85,48 @@ pub const Protein = struct {
         return mass / 1000;
     }
 };
+
+pub const Protein2 = struct {
+    header: []u8,
+    sequence: []u8,
+    mass: f32,
+
+    pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !Protein2 {
+        const h = try allocator.dupe(u8, header);
+        errdefer allocator.free(h);
+
+        const s = try allocator.dupe(u8, sequence);
+        errdefer allocator.free(s);
+
+        return .{
+            .header = h,
+            .sequence = s,
+            .mass = calculateMass(sequence),
+        };
+    }
+
+    pub fn deinit(self: Protein2, allocator: std.mem.Allocator) void {
+        allocator.free(self.sequence);
+        allocator.free(self.header);
+    }
+
+    fn calculateMass(sequence: []const u8) f32 {
+        var mass: f32 = 18.0;
+        for (sequence) |aa| {
+            const k = std.meta.stringToEnum(AminoAcid, &[_]u8{aa});
+            if (k) |key| {
+                mass += massMap.get(key);
+            } else if (aa == '*') {
+                return mass / 1000; // stop codon, we are done
+            } else {
+                return 0.0; // something went wrong
+            }
+        }
+
+        return mass / 1000;
+    }    
+};
+
 
 pub const Fasta = struct {
     header: []u8,
@@ -277,6 +260,65 @@ pub fn parse3(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fas
     try queue.putOne(io, f);
 }
 
+pub fn parse4(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein2), file: std.Io.File) !void {
+    const state = enum { inHeader, inSequence };
+    var myState: ?state = null;
+
+    var header = std.ArrayList(u8).empty;
+    defer header.deinit(allocator);
+
+    var sequence = std.ArrayList(u8).empty;
+    defer sequence.deinit(allocator);
+
+    defer queue.close(io);
+
+    while (true) {
+        var buf: [16]u8 = undefined;
+        const n = file.readStreaming(io, &.{&buf}) catch |err| {
+            if (err == error.EndOfStream) break;
+            return err;
+        };
+        if (n == 0) {
+            if (header.items.len == 0) return;
+            break;
+        }
+        var i: u16 = 0;
+        while (i < n) : (i += 1) {
+            if (myState) |s| {
+                switch (s) {
+                    .inHeader => {
+                        if (buf[i] == '\n') {
+                            myState = state.inSequence;
+                            continue;
+                        }
+                        try header.append(allocator, buf[i]);
+                    },
+                    .inSequence => {
+                        if (buf[i] == '>') {
+                            const p: Protein2 = try .init(allocator, header.items, sequence.items);
+                            try queue.putOne(io, p);
+                            sequence.clearRetainingCapacity();
+                            header.clearRetainingCapacity();
+                            myState = state.inHeader;
+                            continue;
+                        }
+                        if (buf[i] != '\n') {
+                            try sequence.append(allocator, std.ascii.toUpper(buf[i]));
+                        }
+                    },
+                }
+            } else {
+                if (buf[i] == '>') {
+                    myState = state.inHeader;
+                    continue;
+                }
+            }
+        }
+    }
+    const p = try Protein2.init(allocator, header.items, sequence.items);
+    try queue.putOne(io, p);
+}
+
 pub fn parse2(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
     var header: std.ArrayList(u8) = .empty;
     defer header.deinit(allocator);
@@ -311,7 +353,7 @@ pub fn parse2(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fas
     try queue.putOne(io, f);
 }
 
-pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Biomolecule), file: std.Io.File, dorp: biomolecule) !void {
+pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
@@ -345,24 +387,14 @@ pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Biom
                 },
                 .inSequence => {
                     if (byte[0] == '>') {
-                        var f: Fasta = try .init(allocator, header.items, sequence.items);
-                        var forqueue: Biomolecule = undefined;
-                        switch (dorp) {
-                            .dna => {
-                                forqueue = Biomolecule{ .dna = try DNA.init(&f, allocator) };
-                            },
-                            .protein => {
-                                forqueue = Biomolecule{ .protein = try Protein.init(&f) };                                
-                            },
-                        }
-                        try queue.putOne(io, forqueue);
+                        const f: Fasta = try .init(allocator, header.items, sequence.items);
+                        try queue.putOne(io, f);
                         sequence.clearRetainingCapacity();
                         header.clearRetainingCapacity();
                         myState = state.inHeader;
                         continue;
                     }
                     if (byte[0] != '\n') {
-                        //                        const c = std.ascii.toUpper(byte[0]);
                         try sequence.append(allocator, std.ascii.toUpper(byte[0]));
                     }
                 },
@@ -374,17 +406,8 @@ pub fn parse(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Biom
             }
         }
     }
-    var f = try Fasta.init(allocator, header.items, sequence.items);
-    var forqueue: Biomolecule = undefined;
-    switch (dorp) {
-        .dna => {
-            forqueue = Biomolecule{ .dna = try DNA.init(&f, allocator) };
-        },
-        .protein => {
-            forqueue = Biomolecule{ .protein = try Protein.init(&f) };                                
-        },
-    }
-    try queue.putOne(io, forqueue);    
+    const f = try Fasta.init(allocator, header.items, sequence.items);
+    try queue.putOne(io, f);    
 }
 
 pub fn fastaConsumer(

@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
     var producer_task = try init.io.concurrent(fasta.parse3, .{ init.io, init.gpa, &queue, file });
     defer producer_task.cancel(init.io) catch {};
     var counter: u16 = 0;
-
+    
     const t_start = std.Io.Timestamp.now(init.io, .awake);
 
     while (true) {
@@ -65,8 +65,6 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // const elapsed: u64 =
-    //     @intCast(t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).milliseconds);
     const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
     const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
     defer init.gpa.free(elapsedPrint);
@@ -76,41 +74,35 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(finalTally);
     try stdout.writeStreamingAll(init.io, finalTally);
 
-    // Try using a Biomolecule union
-    var queueNew: std.Io.Queue(fasta.Biomolecule) = .init(&.{});
+    // Starting protein queue
+    var queueNew: std.Io.Queue(fasta.Protein2) = .init(&.{});
 
-    const file2 = try std.Io.Dir.cwd().openFile(init.io, "sequences/truncated.pep", .{});
-    defer file2.close(init.io);
+    const fileNew = try std.Io.Dir.cwd().openFile(init.io, "sequences/truncated.pep", .{});
+    defer fileNew.close(init.io);
 
-    var producer_taskNew = try init.io.concurrent(fasta.parse, .{ init.io, init.gpa, &queueNew, file2, bmtype });
-    defer producer_taskNew.cancel(init.io) catch {};
+    var producer_taskNew = try init.io.concurrent(fasta.parse4, .{ init.io, init.gpa, &queueNew, fileNew });
+    defer producer_taskNew.cancel(init.io) catch {};    
+
     while (true) {
-        const myBM = queueNew.getOne(init.io) catch |err| switch (err) {
+        var myProtein = queueNew.getOne(init.io) catch |err| switch (err) {
             error.Closed => break,
             error.Canceled => return,
         };
-//        defer myBM.protein.fasta.deinit(init.gpa);        
+        defer myProtein.deinit(init.gpa);
 
         try stdout.writeStreamingAll(init.io, "---------\n");
-        const hprint = try std.fmt.allocPrint(init.gpa, "{s} {s}\n", .{ "Header:", myBM.protein.fasta.header });
-        defer init.gpa.free(hprint);
-        try stdout.writeStreamingAll(init.io, hprint);
+        const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myProtein.header });
+        defer init.gpa.free(hdprint);
+        try stdout.writeStreamingAll(init.io, hdprint);
 
-        const sprint = try std.fmt.allocPrint(init.gpa, "{s} {s}\n", .{ "Sequence:", myBM.protein.fasta.sequence });
-        defer init.gpa.free(sprint);
-        try stdout.writeStreamingAll(init.io, sprint);
-        switch (myBM) {
-            .dna => |d| {
-                const cmpprint = try std.fmt.allocPrint(init.gpa, "{s} {s}\n", .{ "Complement: ", d.complement });
-                defer init.gpa.free(cmpprint);
-                try stdout.writeStreamingAll(init.io, cmpprint);
-            },
-            .protein => |p| {
-                const massprint = try std.fmt.allocPrint(init.gpa, "{s} {d:0.2} kDa\n", .{ "Mass:", p.mass });
-                defer init.gpa.free(massprint);
-                try stdout.writeStreamingAll(init.io, massprint);
+        const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myProtein.sequence});
+        defer init.gpa.free(sqprint);
+        try stdout.writeStreamingAll(init.io, sqprint);
 
-        },
-        }
+        const massNewprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{myProtein.mass});
+        defer init.gpa.free(massNewprint);
+        try stdout.writeStreamingAll(init.io, massNewprint);
     }
 }
+
+
