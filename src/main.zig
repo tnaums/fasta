@@ -23,42 +23,80 @@ pub fn main(init: std.process.Init) !void {
     defer file.close(init.io);
 
     var counter: u16 = 0;
-
-    // Starting protein queue
-    var queueNew: std.Io.Queue(fasta.Protein) = .init(&.{});
-
     const fileNew = try std.Io.Dir.cwd().openFile(init.io, filepath, .{});
     defer fileNew.close(init.io);
 
-    var producer_taskNew = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queueNew, fileNew });
-    defer producer_taskNew.cancel(init.io) catch {};
+    switch (bmtype) {
+        .protein => {
+            // Starting protein queue
+            var queue: std.Io.Queue(fasta.Protein) = .init(&.{});
 
-    const t_start = std.Io.Timestamp.now(init.io, .awake);
-    while (true) {
-        var myProtein = queueNew.getOne(init.io) catch |err| switch (err) {
-            error.Closed => break,
-            error.Canceled => return,
-        };
-        defer myProtein.deinit(init.gpa);
-        counter += 1;
+            var producer_taskNew = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, fileNew });
+            defer producer_taskNew.cancel(init.io) catch {};
+
+            const t_start = std.Io.Timestamp.now(init.io, .awake);
+            while (true) {
+                var myProtein = queue.getOne(init.io) catch |err| switch (err) {
+                    error.Closed => break,
+                    error.Canceled => return,
+                };
+                defer myProtein.deinit(init.gpa);
+                counter += 1;
         
-        try stdout.writeStreamingAll(init.io, "---------\n");
-        const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myProtein.header });
-        defer init.gpa.free(hdprint);
-        try stdout.writeStreamingAll(init.io, hdprint);
+                try stdout.writeStreamingAll(init.io, "---------\n");
+                const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myProtein.header });
+                defer init.gpa.free(hdprint);
+                try stdout.writeStreamingAll(init.io, hdprint);
 
-        const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myProtein.sequence});
-        defer init.gpa.free(sqprint);
-        try stdout.writeStreamingAll(init.io, sqprint);
+                const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myProtein.sequence});
+                defer init.gpa.free(sqprint);
+                try stdout.writeStreamingAll(init.io, sqprint);
 
-        const massNewprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{myProtein.mass});
-        defer init.gpa.free(massNewprint);
-        try stdout.writeStreamingAll(init.io, massNewprint);
+                const massNewprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{myProtein.mass});
+                defer init.gpa.free(massNewprint);
+                try stdout.writeStreamingAll(init.io, massNewprint);
+            }
+            const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
+            const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
+            defer init.gpa.free(elapsedPrint);
+            try stdout.writeStreamingAll(init.io, elapsedPrint);
+        },
+        .dna => {
+            // Starting DNA queue
+            var queue: std.Io.Queue(fasta.DNA) = .init(&.{});
+            var producer_taskNew = try init.io.concurrent(fasta.parseDNA, .{ init.io, init.gpa, &queue, fileNew });
+            defer producer_taskNew.cancel(init.io) catch {};
+
+            const t_start = std.Io.Timestamp.now(init.io, .awake);
+            while (true) {
+                var myDNA = queue.getOne(init.io) catch |err| switch (err) {
+                    error.Closed => break,
+                    error.Canceled => return,
+                };
+                defer myDNA.deinit(init.gpa);
+                counter += 1;
+        
+                try stdout.writeStreamingAll(init.io, "---------\n");
+                const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myDNA.header });
+                defer init.gpa.free(hdprint);
+                try stdout.writeStreamingAll(init.io, hdprint);
+
+                const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myDNA.sequence});
+                defer init.gpa.free(sqprint);
+                try stdout.writeStreamingAll(init.io, sqprint);
+
+                const rcprint = try std.fmt.allocPrint(init.gpa, "mass: {s}\n", .{myDNA.complement});
+                defer init.gpa.free(rcprint);
+                try stdout.writeStreamingAll(init.io, rcprint);
+            }
+            const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
+            const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
+            defer init.gpa.free(elapsedPrint);
+            try stdout.writeStreamingAll(init.io, elapsedPrint);            
+            
+            std.debug.print("This is a dna type.\n", .{});
+        },
     }
-    const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
-    const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
-    defer init.gpa.free(elapsedPrint);
-    try stdout.writeStreamingAll(init.io, elapsedPrint);
 
     const finalTally = try std.fmt.allocPrint(init.gpa, "Created {d} Fasta objects\n", .{counter});
     defer init.gpa.free(finalTally);

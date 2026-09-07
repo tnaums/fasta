@@ -9,14 +9,6 @@ pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("Run `zig build test` to run the tests.\n", .{});
 }
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
-}
-
 pub const biomolecule = enum { protein, dna };
 
 pub const DNA = struct {
@@ -150,67 +142,63 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
 });
 
 
-// Uses a small buffer; is much faster than using a single byte buffer, but after about 8 bytes, it seems to
-// stay the same. Not slower than using parse2 which reads lines with takeDelimiter. How does
-// file.readStreaming differ from reader.interface.takeDelimiter('\n')?
-// pub fn parse3(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Fasta), file: std.Io.File) !void {
-//     const state = enum { inHeader, inSequence };
-//     var myState: ?state = null;
+pub fn parseDNA(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(DNA), file: std.Io.File) !void {
+    const state = enum { inHeader, inSequence };
+    var myState: ?state = null;
 
-//     var header = std.ArrayList(u8).empty;
-//     defer header.deinit(allocator);
+    var header = std.ArrayList(u8).empty;
+    defer header.deinit(allocator);
 
-//     var sequence = std.ArrayList(u8).empty;
-//     defer sequence.deinit(allocator);
+    var sequence = std.ArrayList(u8).empty;
+    defer sequence.deinit(allocator);
 
-//     defer queue.close(io);
-
-//     while (true) {
-//         var buf: [16]u8 = undefined;
-//         const n = file.readStreaming(io, &.{&buf}) catch |err| {
-//             if (err == error.EndOfStream) break;
-//             return err;
-//         };
-//         if (n == 0) {
-//             if (header.items.len == 0) return;
-//             break;
-//         }
-//         var i: u16 = 0;
-//         while (i < n) : (i += 1) {
-//             if (myState) |s| {
-//                 switch (s) {
-//                     .inHeader => {
-//                         if (buf[i] == '\n') {
-//                             myState = state.inSequence;
-//                             continue;
-//                         }
-//                         try header.append(allocator, buf[i]);
-//                     },
-//                     .inSequence => {
-//                         if (buf[i] == '>') {
-//                             const f: Fasta = try .init(allocator, header.items, sequence.items);
-//                             try queue.putOne(io, f);
-//                             sequence.clearRetainingCapacity();
-//                             header.clearRetainingCapacity();
-//                             myState = state.inHeader;
-//                             continue;
-//                         }
-//                         if (buf[i] != '\n') {
-//                             try sequence.append(allocator, std.ascii.toUpper(buf[i]));
-//                         }
-//                     },
-//                 }
-//             } else {
-//                 if (buf[i] == '>') {
-//                     myState = state.inHeader;
-//                     continue;
-//                 }
-//             }
-//         }
-//     }
-//     const f = try Fasta.init(allocator, header.items, sequence.items);
-//     try queue.putOne(io, f);
-// }
+    defer queue.close(io);
+    var buf: [1024]u8 = undefined;
+    while (true) {
+        const n = file.readStreaming(io, &.{&buf}) catch |err| {
+            if (err == error.EndOfStream) break;
+            return err;
+        };
+        if (n == 0) {
+            if (header.items.len == 0) return;
+            break;
+        }
+        var i: u16 = 0;
+        while (i < n) : (i += 1) {
+            if (myState) |s| {
+                switch (s) {
+                    .inHeader => {
+                        if (buf[i] == '\n') {
+                            myState = state.inSequence;
+                            continue;
+                        }
+                        try header.append(allocator, buf[i]);
+                    },
+                    .inSequence => {
+                        if (buf[i] == '>') {
+                            const d: DNA = try .init(allocator, header.items, sequence.items);
+                            try queue.putOne(io, d);
+                            sequence.clearRetainingCapacity();
+                            header.clearRetainingCapacity();
+                            myState = state.inHeader;
+                            continue;
+                        }
+                        if (buf[i] != '\n') {
+                            try sequence.append(allocator, std.ascii.toUpper(buf[i]));
+                        }
+                    },
+                }
+            } else {
+                if (buf[i] == '>') {
+                    myState = state.inHeader;
+                    continue;
+                }
+            }
+        }
+    }
+    const d = try DNA.init(allocator, header.items, sequence.items);
+    try queue.putOne(io, d);
+}
 
 pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein), file: std.Io.File) !void {
     const state = enum { inHeader, inSequence };
@@ -223,9 +211,8 @@ pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Que
     defer sequence.deinit(allocator);
 
     defer queue.close(io);
-
+    var buf: [1024]u8 = undefined;
     while (true) {
-        var buf: [16]u8 = undefined;
         const n = file.readStreaming(io, &.{&buf}) catch |err| {
             if (err == error.EndOfStream) break;
             return err;
