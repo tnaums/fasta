@@ -31,7 +31,8 @@ pub fn main(init: std.process.Init) !void {
 
             var producer_taskNew = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, file });
             defer producer_taskNew.cancel(init.io) catch {};
-
+            var massiest: f32 = 0;
+            
             const t_start = std.Io.Timestamp.now(init.io, .awake);
             while (true) {
                 var myProtein = queue.getOne(init.io) catch |err| switch (err) {
@@ -41,24 +42,18 @@ pub fn main(init: std.process.Init) !void {
                 defer myProtein.deinit(init.gpa);
                 counter += 1;
 
-                try stdout.writeStreamingAll(init.io, "---------\n");
-
-                const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myProtein.header });
-                defer init.gpa.free(hdprint);
-                try stdout.writeStreamingAll(init.io, hdprint);
-
-                const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myProtein.sequence});
-                defer init.gpa.free(sqprint);
-                try stdout.writeStreamingAll(init.io, sqprint);
-
-                const massprint = try std.fmt.allocPrint(init.gpa, "mass: {d:>0.2}\n", .{myProtein.mass});
-                defer init.gpa.free(massprint);
-                try stdout.writeStreamingAll(init.io, massprint);
+                if (myProtein.mass > massiest) {
+                    massiest = myProtein.mass;
+                }
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
             const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
             defer init.gpa.free(elapsedPrint);
             try stdout.writeStreamingAll(init.io, elapsedPrint);
+
+            const massprint = try std.fmt.allocPrint(init.gpa, "Largest mass was: {d} kDa\n", .{massiest});
+            defer init.gpa.free(massprint);
+            try stdout.writeStreamingAll(init.io, massprint);
         },
         .dna => {
             // Starting DNA queue
@@ -66,6 +61,7 @@ pub fn main(init: std.process.Init) !void {
             var producer_taskNew = try init.io.concurrent(fasta.parseDNA, .{ init.io, init.gpa, &queue, file });
             defer producer_taskNew.cancel(init.io) catch {};
 
+            var longest: u32 = 0;
             const t_start = std.Io.Timestamp.now(init.io, .awake);
             while (true) {
                 var myDNA = queue.getOne(init.io) catch |err| switch (err) {
@@ -75,23 +71,20 @@ pub fn main(init: std.process.Init) !void {
                 defer myDNA.deinit(init.gpa);
                 counter += 1;
 
-                try stdout.writeStreamingAll(init.io, "---------\n");
-                const hdprint = try std.fmt.allocPrint(init.gpa, "{s:>9} {s}\n", .{ "header:", myDNA.header });
-                defer init.gpa.free(hdprint);
-                try stdout.writeStreamingAll(init.io, hdprint);
+                const length: u32 = @intCast(myDNA.sequence.len);
+                if (length > longest) {
+                    longest = length;
+                }
 
-                const sqprint = try std.fmt.allocPrint(init.gpa, "sequence: {s}\n", .{myDNA.sequence});
-                defer init.gpa.free(sqprint);
-                try stdout.writeStreamingAll(init.io, sqprint);
-
-                const rcprint = try std.fmt.allocPrint(init.gpa, "mass: {s}\n", .{myDNA.complement});
-                defer init.gpa.free(rcprint);
-                try stdout.writeStreamingAll(init.io, rcprint);
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
             const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
             defer init.gpa.free(elapsedPrint);
             try stdout.writeStreamingAll(init.io, elapsedPrint);
+
+            const longprint = try std.fmt.allocPrint(init.gpa, "Longest gene was {d} nucleotides\n", .{longest});
+            defer init.gpa.free(longprint);
+            try stdout.writeStreamingAll(init.io, longprint);
         },
     }
 

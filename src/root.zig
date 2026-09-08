@@ -142,6 +142,28 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
 });
 
 
+/// Creates DNA structs from fasta formatted sequence files.
+///
+/// This function parses fasta files, creates DNA structs, and places them
+/// into a queue.
+///
+/// # Parameters
+/// - `io`: Io instance for async
+/// - `queue`: - Io.Queue(DNA)
+/// - `file`: - Io.File with fasta formatted DNA sequences
+///
+/// # Example
+/// ```zig
+/// var queue: std.Io.Queue(fasta.DNA) = .init(&.{});
+/// var producer_taskNew = try init.io.concurrent(fasta.parseDNA, .{ init.io, init.gpa, &queue, file });
+/// defer producer_taskNew.cancel(init.io) catch {};
+/// while (true) {
+///     var myDNA = queue.getOne(init.io) catch |err| switch (err) {
+///     error.Closed => break,
+///     error.Canceled => return,
+///     };
+///}
+///```
 pub fn parseDNA(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(DNA), file: std.Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
@@ -200,6 +222,29 @@ pub fn parseDNA(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(D
     try queue.putOne(io, d);
 }
 
+/// Creates Protein structs from fasta formatted sequence files.
+///
+/// This function parses fasta files, creates Protein structs, and places them
+/// into a queue.
+///
+/// # Parameters
+/// - `io`: Io instance for async
+/// - `queue`: - Io.Queue(Protein)
+/// - `file`: - Io.File with fasta formatted DNA sequences
+///
+/// # Example
+/// ```zig
+/// var queue: std.Io.Queue(fasta.Protein) = .init(&.{});
+/// var producer_task = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, file });
+/// defer producer_task.cancel(init.io) catch {};
+/// while (true) {
+///     var myProtein = queue.getOne(init.io) catch |err| switch (err) {
+///     error.Closed => break,
+///     error.Canceled => return,
+///     };
+///     defer myProtein.deinit(init.gpa);
+///}
+///```
 pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein), file: std.Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
@@ -211,7 +256,7 @@ pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Que
     defer sequence.deinit(allocator);
 
     defer queue.close(io);
-    var buf: [1024]u8 = undefined;
+    var buf: [64]u8 = undefined;
     while (true) {
         const n = file.readStreaming(io, &.{&buf}) catch |err| {
             if (err == error.EndOfStream) break;
@@ -256,6 +301,30 @@ pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Que
     }
     const p = try Protein.init(allocator, header.items, sequence.items);
     try queue.putOne(io, p);
+}
+
+
+test "create Protein" {
+    const testing = std.testing;
+    const header = "fveg_042069";
+    const sequence = "ACDEFGHIRRSTYWPNMNMYILC";
+    const p = try Protein.init(std.testing.allocator, header, sequence);
+    defer p.deinit(std.testing.allocator);
+    try testing.expectEqualStrings(p.header, "fveg_042069");
+    try testing.expect(p.mass > 2.81 and p.mass < 2.83);
+    try testing.expect(p.sequence.len == 23);
+}
+
+test "create DNA" {
+    const testing = std.testing;
+    const header = "fveg_042069";
+    const sequence = "TACTACTATTGCCAGCATTGCTGCTAAAGAAGAAGGGGTATCTCTCGAGAAAAGAGAGGCTGAAGCTCACCACCATCATCATCACCACCACGAGAATTTATACTTTCAAGCTCCTGCCGA";
+    const d = try DNA.init(std.testing.allocator, header, sequence);
+    defer d.deinit(std.testing.allocator);
+    try testing.expectEqualStrings(d.header, "fveg_042069");
+    try testing.expect(d.complement.len == 120);
+    try testing.expect(std.mem.startsWith(u8, d.complement, "TCGGCAGGAG"));
+    try testing.expect(std.mem.endsWith(u8, d.complement, "AATAGTAGTA"));
 }
 
 // pub fn fastaConsumer(
