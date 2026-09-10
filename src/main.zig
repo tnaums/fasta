@@ -3,7 +3,7 @@ const fasta = @import("root.zig");
 
 pub fn main(init: std.process.Init) !void {
     const stdout = std.Io.File.stdout();
-
+    
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len != 3) {
         std.debug.print("Usage: {s} <dna|protein> <filename>\n", .{args[0]});
@@ -75,6 +75,7 @@ pub fn main(init: std.process.Init) !void {
                 if (length > longest) {
                     longest = length;
                 }
+                try fasta.printDNA(init.io, stdout, &myDNA);
 
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
@@ -85,6 +86,7 @@ pub fn main(init: std.process.Init) !void {
             const longprint = try std.fmt.allocPrint(init.gpa, "Longest gene was {d} nucleotides\n", .{longest});
             defer init.gpa.free(longprint);
             try stdout.writeStreamingAll(init.io, longprint);
+
         },
     }
 

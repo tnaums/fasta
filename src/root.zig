@@ -9,6 +9,32 @@ pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("Run `zig build test` to run the tests.\n", .{});
 }
 
+pub fn printDNA(io: Io, file: std.Io.File, dna: *DNA) !void {
+//    const segment = "         |";
+//    const ruler = segment ++ segment ++ segment ++ segment ++ segment ++ segment;
+    var fwdbuf: [71]u8 = undefined;
+    var revbuf: [71]u8 = undefined;
+    var lineIndex: usize= 0;
+    while (lineIndex + 60 < dna.sequence.len) : (lineIndex += 60) {
+        const fwdPrint = try std.fmt.bufPrint(&fwdbuf, "{s} {d}\n", .{ dna.sequence[lineIndex..lineIndex + 60], lineIndex + 60 });
+        const revPrint = try std.fmt.bufPrint(&revbuf, "{s}\n", .{dna.complement[lineIndex..lineIndex + 60]});
+        try file.writeStreamingAll(io, fwdPrint);
+//        try file.writeStreamingAll(io, ruler);
+//        try file.writeStreamingAll(io, "\n");                
+        try file.writeStreamingAll(io, revPrint);
+        try file.writeStreamingAll(io, "\n");        
+                                              
+    }
+
+    const fwdPrint = try std.fmt.bufPrint(&fwdbuf, "{s} {d}\n", .{ dna.sequence[lineIndex..], dna.sequence.len});
+    try file.writeStreamingAll(io, fwdPrint);
+//    try file.writeStreamingAll(io, ruler[0..dna.sequence.len - lineIndex]);
+//    try file.writeStreamingAll(io, "\n");
+    const revPrint = try std.fmt.bufPrint(&revbuf, "{s}\n", .{dna.complement[lineIndex..]});
+    try file.writeStreamingAll(io, revPrint);
+    try file.writeStreamingAll(io, "\n");
+}
+
 pub const biomolecule = enum { protein, dna };
 
 pub const DNA = struct {
