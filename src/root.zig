@@ -23,7 +23,6 @@ pub fn printDNA(io: Io, file: std.Io.File, dna: *DNA) !void {
 //        try file.writeStreamingAll(io, "\n");                
         try file.writeStreamingAll(io, revPrint);
         try file.writeStreamingAll(io, "\n");        
-                                              
     }
 
     const fwdPrint = try std.fmt.bufPrint(&fwdbuf, "{s} {d}\n", .{ dna.sequence[lineIndex..], dna.sequence.len});
@@ -34,6 +33,41 @@ pub fn printDNA(io: Io, file: std.Io.File, dna: *DNA) !void {
     try file.writeStreamingAll(io, revPrint);
     try file.writeStreamingAll(io, "\n");
 }
+
+
+/// Eventually will return the information, but for now I am just printing
+/// it to stdout. Reading frame 1 only.
+pub fn translate(io: Io, allocator: std.mem.Allocator, file: std.Io.File, dna: *DNA) !void {
+    var index: usize = 0;
+    while (index < dna.sequence.len - 2) : (index += 3) {
+        const codon = dna.sequence[index..index + 3];
+        const aminoacid = geneticCode.get(codon) orelse 'X';
+
+        const printAA = try std.fmt.allocPrint(allocator, "{c}", .{aminoacid});
+        defer allocator.free(printAA);
+        try file.writeStreamingAll(io, printAA);
+    }
+    try file.writeStreamingAll(io, "\n\n");
+}
+
+const geneticCode = std.StaticStringMap(u8).initComptime([_]struct { []const u8, u8 }{
+    .{ "TTT", 'F' }, .{ "TTC", 'F' }, .{ "TTG", 'L' }, .{ "TTA", 'L' },
+    .{ "CTT", 'L' }, .{ "CTC", 'L' }, .{ "CTA", 'L' }, .{ "CTG", 'L' },
+    .{ "ATT", 'I' }, .{ "ATC", 'I' }, .{ "ATA", 'I' }, .{ "ATG", 'M' },
+    .{ "GTT", 'V' }, .{ "GTC", 'V' }, .{ "GTA", 'V' }, .{ "GTG", 'V' },
+    .{ "TCT", 'S' }, .{ "TCC", 'S' }, .{ "TCA", 'S' }, .{ "TCG", 'S' },
+    .{ "CCT", 'P' }, .{ "CCC", 'P' }, .{ "CCA", 'P' }, .{ "CCG", 'P' },
+    .{ "ACT", 'T' }, .{ "ACC", 'T' }, .{ "ACA", 'T' }, .{ "ACG", 'T' },
+    .{ "GCT", 'A' }, .{ "GCC", 'A' }, .{ "GCA", 'A' }, .{ "GCG", 'A' },
+    .{ "TAT", 'Y' }, .{ "TAC", 'Y' }, .{ "TAA", '*' }, .{ "TAG", '*' },
+    .{ "CAT", 'H' }, .{ "CAC", 'H' }, .{ "CAA", 'Q' }, .{ "CAG", 'Q' },
+    .{ "AAT", 'N' }, .{ "AAC", 'N' }, .{ "AAA", 'K' }, .{ "AAG", 'K' },
+    .{ "GAT", 'D' }, .{ "GAC", 'D' }, .{ "GAA", 'E' }, .{ "GAG", 'E' },
+    .{ "TGT", 'C' }, .{ "TGC", 'C' }, .{ "TGA", '*' }, .{ "TGG", 'W' },
+    .{ "CGT", 'R' }, .{ "CGC", 'R' }, .{ "CGA", 'R' }, .{ "CGG", 'R' },
+    .{ "AGT", 'S' }, .{ "AGC", 'S' }, .{ "AGA", 'R' }, .{ "AGG", 'R' },
+    .{ "GGT", 'G' }, .{ "GGC", 'G' }, .{ "GGA", 'G' }, .{ "GGG", 'G' },        
+});
 
 pub const biomolecule = enum { protein, dna };
 
