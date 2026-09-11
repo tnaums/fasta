@@ -75,8 +75,19 @@ pub fn main(init: std.process.Init) !void {
                 if (length > longest) {
                     longest = length;
                 }
-                //                try fasta.printDNA(init.io, stdout, &myDNA);
-                try fasta.translate(init.io, init.gpa, stdout, &myDNA);
+  //              try fasta.printDNA(init.io, init.gpa, stdout, &myDNA);
+                //                try fasta.translate(init.io, init.gpa, stdout, &myDNA);
+                const fs = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myDNA});
+                defer init.gpa.free(fs);
+                try stdout.writeStreamingAll(init.io, fs);
+
+
+                const aa = try myDNA.translate(init.gpa);
+                defer init.gpa.free(aa);
+                const translated = try std.fmt.allocPrint(init.gpa, "{s}\n", .{aa});
+                defer init.gpa.free(translated);
+                try stdout.writeStreamingAll(init.io, translated);
+                try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");                
 
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();

@@ -9,47 +9,6 @@ pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("Run `zig build test` to run the tests.\n", .{});
 }
 
-pub fn printDNA(io: Io, file: std.Io.File, dna: *DNA) !void {
-//    const segment = "         |";
-//    const ruler = segment ++ segment ++ segment ++ segment ++ segment ++ segment;
-    var fwdbuf: [71]u8 = undefined;
-    var revbuf: [71]u8 = undefined;
-    var lineIndex: usize= 0;
-    while (lineIndex + 60 < dna.sequence.len) : (lineIndex += 60) {
-        const fwdPrint = try std.fmt.bufPrint(&fwdbuf, "{s} {d}\n", .{ dna.sequence[lineIndex..lineIndex + 60], lineIndex + 60 });
-        const revPrint = try std.fmt.bufPrint(&revbuf, "{s}\n", .{dna.complement[lineIndex..lineIndex + 60]});
-        try file.writeStreamingAll(io, fwdPrint);
-//        try file.writeStreamingAll(io, ruler);
-//        try file.writeStreamingAll(io, "\n");                
-        try file.writeStreamingAll(io, revPrint);
-        try file.writeStreamingAll(io, "\n");        
-    }
-
-    const fwdPrint = try std.fmt.bufPrint(&fwdbuf, "{s} {d}\n", .{ dna.sequence[lineIndex..], dna.sequence.len});
-    try file.writeStreamingAll(io, fwdPrint);
-//    try file.writeStreamingAll(io, ruler[0..dna.sequence.len - lineIndex]);
-//    try file.writeStreamingAll(io, "\n");
-    const revPrint = try std.fmt.bufPrint(&revbuf, "{s}\n", .{dna.complement[lineIndex..]});
-    try file.writeStreamingAll(io, revPrint);
-    try file.writeStreamingAll(io, "\n");
-}
-
-
-/// Eventually will return the information, but for now I am just printing
-/// it to stdout. Reading frame 1 only.
-pub fn translate(io: Io, allocator: std.mem.Allocator, file: std.Io.File, dna: *DNA) !void {
-    var index: usize = 0;
-    while (index < dna.sequence.len - 2) : (index += 3) {
-        const codon = dna.sequence[index..index + 3];
-        const aminoacid = geneticCode.get(codon) orelse 'X';
-
-        const printAA = try std.fmt.allocPrint(allocator, "{c}", .{aminoacid});
-        defer allocator.free(printAA);
-        try file.writeStreamingAll(io, printAA);
-    }
-    try file.writeStreamingAll(io, "\n\n");
-}
-
 const geneticCode = std.StaticStringMap(u8).initComptime([_]struct { []const u8, u8 }{
     .{ "TTT", 'F' }, .{ "TTC", 'F' }, .{ "TTG", 'L' }, .{ "TTA", 'L' },
     .{ "CTT", 'L' }, .{ "CTC", 'L' }, .{ "CTA", 'L' }, .{ "CTG", 'L' },
@@ -66,7 +25,7 @@ const geneticCode = std.StaticStringMap(u8).initComptime([_]struct { []const u8,
     .{ "TGT", 'C' }, .{ "TGC", 'C' }, .{ "TGA", '*' }, .{ "TGG", 'W' },
     .{ "CGT", 'R' }, .{ "CGC", 'R' }, .{ "CGA", 'R' }, .{ "CGG", 'R' },
     .{ "AGT", 'S' }, .{ "AGC", 'S' }, .{ "AGA", 'R' }, .{ "AGG", 'R' },
-    .{ "GGT", 'G' }, .{ "GGC", 'G' }, .{ "GGA", 'G' }, .{ "GGG", 'G' },        
+    .{ "GGT", 'G' }, .{ "GGC", 'G' }, .{ "GGA", 'G' }, .{ "GGG", 'G' },
 });
 
 pub const biomolecule = enum { protein, dna };
@@ -112,6 +71,35 @@ pub const DNA = struct {
         }
         return revcomp;
     }
+
+    pub fn format(self: DNA, writer: *std.Io.Writer) !void {
+        const bp = self.sequence.len;
+        try writer.print(">{s}|{d}bp\n", .{ self.header, bp });
+        var lineIndex: usize = 0;
+        while (lineIndex + 60 < self.sequence.len) : (lineIndex += 60) {
+            try writer.print("{s}\n", .{self.sequence[lineIndex .. lineIndex + 60]});
+        }
+        try writer.print("{s}\n", .{self.sequence[lineIndex..]});
+    }
+
+    pub fn translate(self: DNA, allocator: std.mem.Allocator) ![]u8 {
+        //    var j: usize = 0;
+        //    while (j < 3) : (j += 1) {
+        var aminoacids = std.ArrayList(u8).empty;
+        defer aminoacids.deinit(allocator);
+
+        var index: usize = 0;
+        while (index < self.sequence.len - 2) : (index += 3) {
+            const codon = self.sequence[index .. index + 3];
+            const aminoacid = geneticCode.get(codon) orelse 'X';
+            try aminoacids.append(allocator, aminoacid);
+            //        const printAA = try std.fmt.allocPrint(allocator, "{c}", .{aminoacid});
+            //        defer allocator.free(printAA);
+            //        try file.writeStreamingAll(io, printAA);
+        }
+        return aminoacids.toOwnedSlice(allocator);
+        //        try file.writeStreamingAll(io, "\n\n");
+    }
 };
 
 pub const Protein = struct {
@@ -152,7 +140,7 @@ pub const Protein = struct {
         }
 
         return mass / 1000;
-    }    
+    }
 };
 
 const AminoAcid = enum {
@@ -200,7 +188,6 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
     .W = 186.21220,
     .Y = 163.17512,
 });
-
 
 /// Creates DNA structs from fasta formatted sequence files.
 ///
@@ -362,7 +349,6 @@ pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Que
     const p = try Protein.init(allocator, header.items, sequence.items);
     try queue.putOne(io, p);
 }
-
 
 test "create Protein" {
     const testing = std.testing;
