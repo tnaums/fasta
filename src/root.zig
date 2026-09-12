@@ -63,6 +63,35 @@ pub const DNA = struct {
     pub fn addTranslation(self: *DNA, allocator: std.mem.Allocator) !void {
         self.translation = try self.translate(allocator);
     }
+
+    pub fn printOrfs(self: DNA, allocator: std.mem.Allocator, cutoff: ?usize) void {
+        _ = allocator;
+        var filter: usize = undefined;
+        if (cutoff) |value| {
+            filter = value;
+        } else {
+            filter = 0;
+        }
+        
+        var seq: []u8 = undefined;
+        if (self.translation) |value| {
+            for (0..6) |i| {
+                seq = value[i];
+                var orfs = std.mem.tokenizeScalar(u8, seq, '*');
+                while (true) {
+                    if (orfs.next()) |orf| {
+                        if (orf.len > filter) {
+                            std.debug.print("frame {d}: ", .{i});
+                            std.debug.print("{s}\n\n", .{orf});
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+    }
     
     fn reverseComplement(allocator: std.mem.Allocator, forward: []const u8) ![]const u8 {
         var revcomp = try allocator.alloc(u8, forward.len);
@@ -91,7 +120,7 @@ pub const DNA = struct {
         try writer.print("{s}\n", .{self.sequence[lineIndex..]});
     }
 
-    pub fn translate(self: DNA, allocator: std.mem.Allocator) ![6][]u8 {
+    fn translate(self: DNA, allocator: std.mem.Allocator) ![6][]u8 {
         var accumulator: [6][]u8 = undefined;
         var j: usize = 0;
 
