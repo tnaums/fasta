@@ -191,6 +191,14 @@ pub const Protein = struct {
 
         return mass / 1000;
     }
+        pub fn format(self: Protein, writer: *std.Io.Writer) !void {
+            try writer.print(">{s}|{d:.2}kDa\n", .{ self.header, self.mass });
+            var lineIndex: usize = 0;
+            while (lineIndex + 60 < self.sequence.len) : (lineIndex += 60) {
+                try writer.print("{s}\n", .{self.sequence[lineIndex .. lineIndex + 60]});
+            }
+            try writer.print("{s}\n", .{self.sequence[lineIndex..]});
+    }
 };
 
 const AminoAcid = enum {

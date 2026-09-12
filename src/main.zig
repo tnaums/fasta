@@ -42,6 +42,9 @@ pub fn main(init: std.process.Init) !void {
 
                 if (myProtein.mass > massiest) {
                     massiest = myProtein.mass;
+                    const printProtein = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myProtein});
+                    defer init.gpa.free(printProtein);
+                    try stdout.writeStreamingAll(init.io, printProtein);
                 }
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
