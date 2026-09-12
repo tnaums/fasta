@@ -34,7 +34,9 @@ pub const DNA = struct {
     header: []const u8,
     sequence: []const u8,
     complement: []const u8,
+    translation: ?[6][]u8 = null,
 
+    
     pub fn init(allocator: std.mem.Allocator, header: []const u8, sequence: []const u8) !DNA {
         const h = try allocator.dupe(u8, header);
         errdefer allocator.free(h);
@@ -50,11 +52,18 @@ pub const DNA = struct {
     }
 
     pub fn deinit(self: DNA, allocator: std.mem.Allocator) void {
+        if (self.translation) |value| {
+            for (0..6) |t| {allocator.free(value[t]);}
+        }
         allocator.free(self.complement);
         allocator.free(self.sequence);
         allocator.free(self.header);
     }
 
+    pub fn addTranslation(self: *DNA, allocator: std.mem.Allocator) !void {
+        self.translation = try self.translate(allocator);
+    }
+    
     fn reverseComplement(allocator: std.mem.Allocator, forward: []const u8) ![]const u8 {
         var revcomp = try allocator.alloc(u8, forward.len);
         var i = forward.len;
@@ -82,23 +91,35 @@ pub const DNA = struct {
         try writer.print("{s}\n", .{self.sequence[lineIndex..]});
     }
 
-    pub fn translate(self: DNA, allocator: std.mem.Allocator) ![]u8 {
-        //    var j: usize = 0;
-        //    while (j < 3) : (j += 1) {
-        var aminoacids = std.ArrayList(u8).empty;
-        defer aminoacids.deinit(allocator);
+    pub fn translate(self: DNA, allocator: std.mem.Allocator) ![6][]u8 {
+        var accumulator: [6][]u8 = undefined;
+        var j: usize = 0;
 
-        var index: usize = 0;
-        while (index < self.sequence.len - 2) : (index += 3) {
-            const codon = self.sequence[index .. index + 3];
-            const aminoacid = geneticCode.get(codon) orelse 'X';
-            try aminoacids.append(allocator, aminoacid);
-            //        const printAA = try std.fmt.allocPrint(allocator, "{c}", .{aminoacid});
-            //        defer allocator.free(printAA);
-            //        try file.writeStreamingAll(io, printAA);
+        while (j < 3) : (j += 1) {
+            var aminoacids = std.ArrayList(u8).empty;
+            defer aminoacids.deinit(allocator);
+
+            var index: usize = 0 + j;
+            while (index < self.sequence.len - 2) : (index += 3) {
+                const codon = self.sequence[index .. index + 3];
+                const aminoacid = geneticCode.get(codon) orelse 'X';
+                try aminoacids.append(allocator, aminoacid);
+            }
+            accumulator[j] = try aminoacids.toOwnedSlice(allocator);
         }
-        return aminoacids.toOwnedSlice(allocator);
-        //        try file.writeStreamingAll(io, "\n\n");
+        while (j < 6) : (j += 1) {
+            var aminoacids = std.ArrayList(u8).empty;
+            defer aminoacids.deinit(allocator);
+
+            var index: usize = j - 3;
+            while (index < self.complement.len - 2) : (index += 3) {
+                const codon = self.complement[index .. index + 3];
+                const aminoacid = geneticCode.get(codon) orelse 'X';
+                try aminoacids.append(allocator, aminoacid);
+            }
+            accumulator[j] = try aminoacids.toOwnedSlice(allocator);
+        }
+        return accumulator;
     }
 };
 
@@ -372,13 +393,3 @@ test "create DNA" {
     try testing.expect(std.mem.startsWith(u8, d.complement, "TCGGCAGGAG"));
     try testing.expect(std.mem.endsWith(u8, d.complement, "AATAGTAGTA"));
 }
-
-// pub fn fastaConsumer(
-//     io: std.Io,
-//     queue: *std.Io.Queue(Fasta),
-// ) !Fasta {
-//     const value = queue.getOne(io) catch |err| {
-//         return err;
-//     };
-//     return value;
-// }

@@ -3,7 +3,7 @@ const fasta = @import("root.zig");
 
 pub fn main(init: std.process.Init) !void {
     const stdout = std.Io.File.stdout();
-    
+
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len != 3) {
         std.debug.print("Usage: {s} <dna|protein> <filename>\n", .{args[0]});
@@ -26,13 +26,11 @@ pub fn main(init: std.process.Init) !void {
 
     switch (bmtype) {
         .protein => {
-            // Starting protein queue
             var queue: std.Io.Queue(fasta.Protein) = .init(&.{});
-
-            var producer_taskNew = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, file });
-            defer producer_taskNew.cancel(init.io) catch {};
+            var producer_task = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, file });
+            defer producer_task.cancel(init.io) catch {};
             var massiest: f32 = 0;
-            
+
             const t_start = std.Io.Timestamp.now(init.io, .awake);
             while (true) {
                 var myProtein = queue.getOne(init.io) catch |err| switch (err) {
@@ -58,8 +56,8 @@ pub fn main(init: std.process.Init) !void {
         .dna => {
             // Starting DNA queue
             var queue: std.Io.Queue(fasta.DNA) = .init(&.{});
-            var producer_taskNew = try init.io.concurrent(fasta.parseDNA, .{ init.io, init.gpa, &queue, file });
-            defer producer_taskNew.cancel(init.io) catch {};
+            var producer_task = try init.io.concurrent(fasta.parseDNA, .{ init.io, init.gpa, &queue, file });
+            defer producer_task.cancel(init.io) catch {};
 
             var longest: u32 = 0;
             const t_start = std.Io.Timestamp.now(init.io, .awake);
@@ -75,20 +73,21 @@ pub fn main(init: std.process.Init) !void {
                 if (length > longest) {
                     longest = length;
                 }
-  //              try fasta.printDNA(init.io, init.gpa, stdout, &myDNA);
-                //                try fasta.translate(init.io, init.gpa, stdout, &myDNA);
+
                 const fs = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myDNA});
                 defer init.gpa.free(fs);
                 try stdout.writeStreamingAll(init.io, fs);
 
+                try myDNA.addTranslation(init.gpa);
 
-                const aa = try myDNA.translate(init.gpa);
-                defer init.gpa.free(aa);
-                const translated = try std.fmt.allocPrint(init.gpa, "{s}\n", .{aa});
-                defer init.gpa.free(translated);
-                try stdout.writeStreamingAll(init.io, translated);
-                try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");                
-
+                if (myDNA.translation) |value| {
+                    for (0..6) |frame| {
+                        const framePrint = try std.fmt.allocPrint(init.gpa, "{d}: {s}\n", .{ frame, value[frame] });
+                        defer init.gpa.free(framePrint);
+                        try stdout.writeStreamingAll(init.io, framePrint);
+                    }
+                }
+                try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
             const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
@@ -98,7 +97,6 @@ pub fn main(init: std.process.Init) !void {
             const longprint = try std.fmt.allocPrint(init.gpa, "Longest gene was {d} nucleotides\n", .{longest});
             defer init.gpa.free(longprint);
             try stdout.writeStreamingAll(init.io, longprint);
-
         },
     }
 
