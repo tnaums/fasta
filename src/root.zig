@@ -60,6 +60,62 @@ pub const DNA = struct {
         allocator.free(self.header);
     }
 
+    pub fn ligate(first: *DNA, second: *DNA, allocator: std.mem.Allocator) !DNA {
+        const combined_header = try std.fmt.allocPrint(allocator, "{s}_+_{s}", .{ first.header, second.header });
+        defer allocator.free(combined_header);
+        const combined_sequence = try std.fmt.allocPrint(allocator, "{s}{s}", .{ first.sequence, second.sequence });
+        defer allocator.free(combined_sequence);
+
+        return DNA.init(allocator, combined_header, combined_sequence);
+    }
+
+    pub fn mapDNA(self: *DNA, allocator: std.mem.Allocator, io: Io, file: Io.File) !void {
+        const ruler = "----:----|----:----|----:----|----:----|----:----|----:----|";
+        if (self.translation) |value| {
+            _ = value;
+        } else {
+            self.translation = try self.translate(allocator);
+        }
+        var zeroFrame: []u8 = undefined;
+        if (self.translation) |value| {
+            zeroFrame = value[1]; // second reading frame
+        } else {
+            unreachable;
+        }
+        var aminoacids = std.ArrayList(u8).empty;
+        defer aminoacids.deinit(allocator);
+        for (zeroFrame) |aa| {
+            try aminoacids.append(allocator, ' ');            
+            try aminoacids.append(allocator, aa);
+            try aminoacids.append(allocator, ' ');
+        }
+        var index: usize = 0;
+        var buffer1: [70]u8 = undefined;
+        var buffer2: [70]u8 = undefined;
+        var buffer3: [70]u8 = undefined;
+        var buffer4: [70]u8 = undefined;        
+        while (index < self.sequence.len - 60) : (index += 60) {
+
+            const line1 = try std.fmt.bufPrint(&buffer1, "{s}\n", .{self.sequence[index..index + 60]});
+            const line2 = try std.fmt.bufPrint(&buffer2, "{s} {d:>5}\n", .{ ruler, index + 60 });
+            const line3 = try std.fmt.bufPrint(&buffer3, "{s}\n", .{self.complement[index..index + 60]});
+            const line4 = try std.fmt.bufPrint(&buffer4, "{s}\n", .{aminoacids.items[index..index + 60]});
+            try file.writeStreamingAll(io, line1);
+            try file.writeStreamingAll(io, line2);
+            try file.writeStreamingAll(io, line3);
+            try file.writeStreamingAll(io, line4);
+            try file.writeStreamingAll(io, "\n");
+        }
+        const line1 = try std.fmt.bufPrint(&buffer1, "{s}\n", .{self.sequence[index..]});
+        const line2 = try std.fmt.bufPrint(&buffer2, "{s} {d:>5}\n", .{ruler[0..line1.len - 1], index + line1.len - 1});
+        const line3 = try std.fmt.bufPrint(&buffer3, "{s}\n", .{self.complement[index..]});
+        const line4 = try std.fmt.bufPrint(&buffer4, "{s}\n", .{aminoacids.items[index..]});
+        try file.writeStreamingAll(io, line1);
+        try file.writeStreamingAll(io, line2);
+        try file.writeStreamingAll(io, line3);
+        try file.writeStreamingAll(io, line4);
+    }
+
     pub fn addTranslation(self: *DNA, allocator: std.mem.Allocator) !void {
         self.translation = try self.translate(allocator);
     }
@@ -110,7 +166,7 @@ pub const DNA = struct {
         return revcomp;
     }
 
-    pub fn format(self: DNA, writer: *std.Io.Writer) !void {
+    pub fn format(self: DNA, writer: *Io.Writer) !void {
         const bp = self.sequence.len;
         try writer.print(">{s}|{d}bp\n", .{ self.header, bp });
         var lineIndex: usize = 0;
@@ -191,7 +247,7 @@ pub const Protein = struct {
 
         return mass / 1000;
     }
-        pub fn format(self: Protein, writer: *std.Io.Writer) !void {
+        pub fn format(self: Protein, writer: *Io.Writer) !void {
             try writer.print(">{s}|{d:.2}kDa\n", .{ self.header, self.mass });
             var lineIndex: usize = 0;
             while (lineIndex + 60 < self.sequence.len) : (lineIndex += 60) {
@@ -269,7 +325,7 @@ const massMap: std.EnumArray(AminoAcid, f32) = .init(.{
 ///     };
 ///}
 ///```
-pub fn parseDNA(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(DNA), file: std.Io.File) !void {
+pub fn parseDNA(io: Io, allocator: std.mem.Allocator, queue: *Io.Queue(DNA), file: Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
@@ -350,7 +406,7 @@ pub fn parseDNA(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(D
 ///     defer myProtein.deinit(init.gpa);
 ///}
 ///```
-pub fn parseProtein(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein), file: std.Io.File) !void {
+pub fn parseProtein(io: Io, allocator: std.mem.Allocator, queue: *Io.Queue(Protein), file: Io.File) !void {
     const state = enum { inHeader, inSequence };
     var myState: ?state = null;
 
@@ -429,4 +485,29 @@ test "create DNA" {
     try testing.expect(d.complement.len == 120);
     try testing.expect(std.mem.startsWith(u8, d.complement, "TCGGCAGGAG"));
     try testing.expect(std.mem.endsWith(u8, d.complement, "AATAGTAGTA"));
+}
+
+test "ligate DNA" {
+    const testing = std.testing;
+    const header = "fveg_042069";
+    const sequence = "TACTACTATTGCCAGCATTGCTGCTAAAGAAGAAGGGGTATCTCTCGAGAAAAGAGAGGCTGAAGCTCACCACCATCATCATCACCACCACGAGAATTTATACTTTCAAGCTCCTGCCGA";
+    var d = try DNA.init(testing.allocator, header, sequence);
+    defer d.deinit(testing.allocator);
+    try testing.expectEqualStrings(d.header, "fveg_042069");
+    try testing.expect(d.complement.len == 120);
+    try testing.expect(std.mem.startsWith(u8, d.complement, "TCGGCAGGAG"));
+    try testing.expect(std.mem.endsWith(u8, d.complement, "AATAGTAGTA"));
+
+    const header2 = "second_part";
+    const sequence2 = "TACTACTATTGCCAGCATTGCTGCTAAAGAAGAAGGGGTATCTCTCGAGAAAAGAGAGGCTGAACTCACCACCATCATCATCACCACCACGAGAATTTATACTTTCAAGCTCCTGCCGA";
+    var d2 = try DNA.init(testing.allocator, header2, sequence2);
+    defer d2.deinit(std.testing.allocator);
+    try testing.expectEqualStrings(d2.header, "second_part");
+    try testing.expect(d2.complement.len == 119);
+    try testing.expect(std.mem.startsWith(u8, d.complement, "TCGGCAGGAG"));
+    try testing.expect(std.mem.endsWith(u8, d.complement, "AATAGTAGTA"));
+
+    var combined = try DNA.ligate(&d, &d2, testing.allocator);
+    defer combined.deinit(testing.allocator);
+    try testing.expect(combined.sequence.len == 239);
 }
