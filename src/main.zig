@@ -83,7 +83,7 @@ pub fn main(init: std.process.Init) !void {
 
                 try myDNA.addTranslation(init.gpa);
                 myDNA.printOrfs(init.gpa, 50);
-                try myDNA.mapDNA(init.gpa, init.io, stdout);
+                try myDNA.mapDNA(init.gpa, init.io, stdout, fasta.readingframe.second);
 
                 try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");
             }

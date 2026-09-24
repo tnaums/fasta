@@ -29,6 +29,7 @@ const geneticCode = std.StaticStringMap(u8).initComptime([_]struct { []const u8,
 });
 
 pub const biomolecule = enum { protein, dna };
+pub const readingframe = enum { first, second, third };
 
 pub const DNA = struct {
     header: []const u8,
@@ -69,25 +70,44 @@ pub const DNA = struct {
         return DNA.init(allocator, combined_header, combined_sequence);
     }
 
-    pub fn mapDNA(self: *DNA, allocator: std.mem.Allocator, io: Io, file: Io.File) !void {
+    pub fn mapDNA(self: *DNA, allocator: std.mem.Allocator, io: Io, file: Io.File, frame: readingframe) !void {
+        const frameInt = @intFromEnum(frame);
         const ruler = "----:----|----:----|----:----|----:----|----:----|----:----|";
         if (self.translation) |value| {
             _ = value;
         } else {
             self.translation = try self.translate(allocator);
         }
-        var zeroFrame: []u8 = undefined;
+        var selectedFrame: []u8 = undefined;
         if (self.translation) |value| {
-            zeroFrame = value[1]; // second reading frame
+            selectedFrame = value[frameInt]; // selects the []u8
         } else {
             unreachable;
         }
         var aminoacids = std.ArrayList(u8).empty;
         defer aminoacids.deinit(allocator);
-        for (zeroFrame) |aa| {
-            try aminoacids.append(allocator, ' ');            
-            try aminoacids.append(allocator, aa);
-            try aminoacids.append(allocator, ' ');
+        switch(frame) {
+            .first => {
+                for (selectedFrame) |aa| {
+                    try aminoacids.append(allocator, aa);
+                    try aminoacids.append(allocator, ' ');
+                    try aminoacids.append(allocator, ' ');                    
+                }
+            },
+            .second => {
+                for (selectedFrame) |aa| {
+                    try aminoacids.append(allocator, ' ');
+                    try aminoacids.append(allocator, aa);
+                    try aminoacids.append(allocator, ' ');
+                }
+            },
+            .third => {
+                for (selectedFrame) |aa| {
+                    try aminoacids.append(allocator, ' ');
+                    try aminoacids.append(allocator, ' ');
+                    try aminoacids.append(allocator, aa);
+                }  
+            },
         }
         var index: usize = 0;
         var buffer1: [70]u8 = undefined;
