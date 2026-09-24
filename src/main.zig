@@ -84,13 +84,7 @@ pub fn main(init: std.process.Init) !void {
                 try myDNA.addTranslation(init.gpa);
                 myDNA.printOrfs(init.gpa, 50);
                 try myDNA.mapDNA(init.gpa, init.io, stdout);
-                // if (myDNA.translation) |value| {
-                //     for (0..6) |frame| {
-                //         const framePrint = try std.fmt.allocPrint(init.gpa, "{d}: {s}\n", .{ frame, value[frame] });
-                //         defer init.gpa.free(framePrint);
-                //         try stdout.writeStreamingAll(init.io, framePrint);
-                //     }
-                // }
+
                 try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();

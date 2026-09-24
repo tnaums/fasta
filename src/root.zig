@@ -464,6 +464,61 @@ pub fn parseProtein(io: Io, allocator: std.mem.Allocator, queue: *Io.Queue(Prote
     try queue.putOne(io, p);
 }
 
+pub fn parseSingleDNA(io: Io, allocator: std.mem.Allocator, filepath: []const u8) !DNA {
+    // open file
+    const file = try std.Io.Dir.cwd().openFile(io, filepath, .{});
+    defer file.close(io);
+
+    const state = enum { inHeader, inSequence };
+    var myState: ?state = null;
+    // initialize ArrayLists
+    var header = std.ArrayList(u8).empty;
+    defer header.deinit(allocator);
+    var sequence = std.ArrayList(u8).empty;
+    defer sequence.deinit(allocator);
+
+    var buf: [1024]u8 = undefined;
+    // parse out the info
+    while (true) {
+        const n = file.readStreaming(io, &.{&buf}) catch |err| {
+            if (err == error.EndOfStream) break;
+            return err;
+        };
+        if (n == 0) {
+            if (header.items.len == 0) break;
+            break;
+        }
+        var i: u16 = 0;
+        while (i < n) : (i += 1) {
+            if (myState) |s| {
+                switch (s) {
+                    .inHeader => {
+                        if (buf[i] == '\n') {
+                            myState = state.inSequence;
+                            continue;
+                        }
+                        try header.append(allocator, buf[i]);
+                    },
+                    .inSequence => {
+                        if (buf[i] == '>') { // if a second sequence begins, just return the first one
+                            return try DNA.init(allocator, header.items, sequence.items);
+                        }
+                        if (buf[i] != '\n') {
+                            try sequence.append(allocator, std.ascii.toUpper(buf[i]));
+                        }
+                    },
+                }
+            } else {
+                if (buf[i] == '>') {
+                    myState = state.inHeader;
+                    continue;
+                }
+            }
+        }
+    }
+    return try DNA.init(allocator, header.items, sequence.items);
+}
+
 test "create Protein" {
     const testing = std.testing;
     const header = "fveg_042069";
