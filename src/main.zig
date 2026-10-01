@@ -27,7 +27,7 @@ pub fn main(init: std.process.Init) !void {
     switch (bmtype) {
         .protein => {
             var queue: std.Io.Queue(fasta.Protein) = .init(&.{});
-            var producer_task = try init.io.concurrent(fasta.parseProtein, .{ init.io, init.gpa, &queue, file });
+            var producer_task = try init.io.concurrent(fasta.parseProteinSIMD, .{ init.io, init.gpa, &queue, file });
             defer producer_task.cancel(init.io) catch {};
             var massiest: f32 = 0;
 
@@ -42,9 +42,9 @@ pub fn main(init: std.process.Init) !void {
 
                 if (myProtein.mass > massiest) {
                     massiest = myProtein.mass;
-                    const printProtein = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myProtein});
-                    defer init.gpa.free(printProtein);
-                    try stdout.writeStreamingAll(init.io, printProtein);
+//                    const printProtein = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myProtein});
+//                    defer init.gpa.free(printProtein);
+//                    try stdout.writeStreamingAll(init.io, printProtein);
                 }
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();

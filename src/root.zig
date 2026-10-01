@@ -9,6 +9,12 @@ pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("Run `zig build test` to run the tests.\n", .{});
 }
 
+pub const FastaError = error{
+    ParsingProblem,
+    InitializingFailure,
+    TranslationError,
+};
+
 const geneticCode = std.StaticStringMap(u8).initComptime([_]struct { []const u8, u8 }{
     .{ "TTT", 'F' }, .{ "TTC", 'F' }, .{ "TTG", 'L' }, .{ "TTA", 'L' },
     .{ "CTT", 'L' }, .{ "CTC", 'L' }, .{ "CTA", 'L' }, .{ "CTG", 'L' },
@@ -483,6 +489,199 @@ pub fn parseProtein(io: Io, allocator: std.mem.Allocator, queue: *Io.Queue(Prote
     const p = try Protein.init(allocator, header.items, sequence.items);
     try queue.putOne(io, p);
 }
+
+pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io.Queue(Protein), file: Io.File) !void {
+    defer queue.close(io);
+    const state = enum { inHeader, inSequence };
+    var myState: ?state = null;
+
+    var vcounter: u32 = 0;
+//    std.debug.print("Starting function with SIMD.\n", .{});
+
+    // 64KB buffer for high throughput
+    var buffer: [64 * 1024]u8 = undefined;
+    // SIMD Configuration
+    const VSize = 32;
+    const Vector = @Vector(VSize, u8);
+    const nl: Vector = @splat('\n');
+    const ns: Vector = @splat('>');
+
+    var header: std.ArrayList(u8) = .empty;
+    var sequence: std.ArrayList(u8) = .empty;
+    defer header.deinit(allocator);
+    defer sequence.deinit(allocator);
+    const Bitmask = std.meta.Int(.unsigned, 32);
+
+    while (true) {
+        const n = file.readStreaming(io, &.{&buffer}) catch |err| {
+            if (err == error.EndOfStream) break;
+            return err;
+        };
+//        std.debug.print("n = {d}\n", .{n});
+
+        var i: usize = 0;
+
+        // 1. SIMD LOOP
+        while (i + VSize <= n) : (i += VSize) {
+            vcounter += 1;
+
+            const v: Vector = buffer[i..][0..VSize].*;
+            const newLines = v == nl;
+            const newSequences = v == ns;
+
+            const mask: Bitmask = @bitCast(newSequences);
+            const mask2: Bitmask = @bitCast(newLines);
+
+            const newsequences_index_left = @ctz(mask); // matches left-most '>'
+            const newlines_index_left = @ctz(mask2); // matches left-most '\n'
+            const newlines_number: u8 = @popCount(mask2); // might be 0 or 1 or 2 or 3 new lines
+
+            if (myState) |s| {
+                switch (s) {
+                    .inHeader => {
+                        if (newlines_index_left != 0) {
+                            try header.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+                        }
+                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                        myState = state.inSequence;
+                    },
+                    .inSequence => {
+                        if (newsequences_index_left != 32) { // found a new sequence
+                            if (newlines_number == 3) {
+                                const newlines_index_right = @clz(mask2); // matches right-most '\n'
+                                try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+                                try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + newsequences_index_left - 1]);
+                                // put sequence in queue here
+                                const p = try Protein.init(allocator, header.items, sequence.items);
+                                //                            defer p.deinit(allocator);
+                                try queue.putOne(io, p);
+
+                                header.clearRetainingCapacity();
+                                sequence.clearRetainingCapacity();
+                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 31 - newlines_index_right]);
+                                try sequence.appendSlice(allocator, buffer[i + 32 - newlines_index_right .. i + 32]);
+                                continue;
+                            }
+                            if (newlines_number == 2) {
+                                if (newlines_index_left + 1 > newsequences_index_left - 1) {
+                                    const newlines_index_right = @clz(mask2); // matches right-most '\n'
+                                    try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+
+                                    const p = try Protein.init(allocator, header.items, sequence.items);
+                                    try queue.putOne(io, p);
+
+                                    header.clearRetainingCapacity();
+                                    sequence.clearRetainingCapacity();
+
+                                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 31 - newlines_index_right]);
+                                    try sequence.appendSlice(allocator, buffer[i + 32 - newlines_index_right .. i + 32]);
+                                    continue;
+                                }
+
+                                try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+                                try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + newsequences_index_left - 1]);
+                                const p = try Protein.init(allocator, header.items, sequence.items);
+                                try queue.putOne(io, p);
+
+                                header.clearRetainingCapacity();
+                                sequence.clearRetainingCapacity();
+
+                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 32]);
+                                myState = state.inHeader;
+                                continue;
+                            } // end of nelines_number == 2
+
+                            if (newsequences_index_left == 0) { // starts with >
+                                // put protein in queue first
+                                const p = try Protein.init(allocator, header.items, sequence.items);
+                                try queue.putOne(io, p);
+
+                                header.clearRetainingCapacity();
+                                sequence.clearRetainingCapacity();
+
+                                try header.appendSlice(allocator, buffer[i + 1 .. i + newlines_index_left]);
+                                try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                                continue;
+                            }
+                            // start with sequence and ends in header; sequence\n>startOfHeader
+                            try sequence.appendSlice(allocator, buffer[i .. i + newsequences_index_left - 1]);
+                            const p = try Protein.init(allocator, header.items, sequence.items);
+                            try queue.putOne(io, p);
+
+                            header.clearRetainingCapacity();
+                            sequence.clearRetainingCapacity();
+
+                            try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 32]);
+                            myState = state.inHeader;
+                            continue;
+                        }
+                        if (newlines_index_left == 32) {
+                            // in sequence and no newlines; just append to sequence
+                            try sequence.appendSlice(allocator, buffer[i .. i + 32]);
+                            continue;
+                        }
+                        if (newlines_index_left == 0) {
+                            // first character is \n, just append the rest
+                            try sequence.appendSlice(allocator, buffer[i + 1 .. i + 32]);
+                            continue;
+                        }
+                        // single internal newline, append either side to sequence
+                        try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                    },
+                }
+            } else {
+                if (newsequences_index_left != 32) { // There is a new sequence
+                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + newlines_index_left]);
+                    try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                    if (newlines_index_left == 32) { // newsequence without newline
+                        try header.appendSlice(allocator, buffer[i .. i + 32]);
+                        myState = state.inHeader;
+                        continue;
+                    }
+                    myState = state.inSequence;
+                }
+            }
+        } // end of SIMD loop
+        // process the remaining bytes in the buffer
+        while (i < n) : (i += 1) {
+            const byte: u8 = buffer[i];
+            if (myState) |s| {
+                switch (s) {
+                    .inHeader => {
+                        if (byte == '\n') {
+                            myState = state.inSequence;
+                            continue;
+                        }
+                        try header.append(allocator, byte);
+                    },
+                    .inSequence => {
+                        if (byte == '>') {
+                            const f: Protein = try .init(allocator, header.items, sequence.items);
+                            try queue.putOne(io, f);
+                            sequence.clearRetainingCapacity();
+                            header.clearRetainingCapacity();
+                            myState = state.inHeader;
+                            continue;
+                        }
+                        if (byte != '\n') {
+                            try sequence.append(allocator, byte);
+                        }
+                    },
+                }
+            } else {
+                if (byte == '>') {
+                    myState = state.inHeader;
+                    continue;
+                }
+            }
+        }
+    }
+    const f = try Protein.init(allocator, header.items, sequence.items);
+    try queue.putOne(io, f);
+}
+
+
 
 pub fn parseSingleDNA(io: Io, allocator: std.mem.Allocator, filepath: []const u8) !DNA {
     // open file
