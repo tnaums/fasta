@@ -536,6 +536,11 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
             const newlines_index_left = @ctz(mask2); // matches left-most '\n'
             const newlines_number: u8 = @popCount(mask2); // might be 0 or 1 or 2 or 3 new lines
 
+            // For debugging
+//            std.debug.print("\nLoop number {d}; {any}\n", .{ vcounter, myState });
+//            std.debug.print("{b:>32}: {d}\n", .{ mask, newsequences_index_left });
+//            std.debug.print("{b:>32}: {d}\n", .{ mask2, newlines_index_left });
+            
             if (myState) |s| {
                 switch (s) {
                     .inHeader => {
@@ -577,7 +582,6 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                                     try sequence.appendSlice(allocator, buffer[i + 32 - newlines_index_right .. i + 32]);
                                     continue;
                                 }
-
                                 try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
                                 try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + newsequences_index_left - 1]);
                                 const p = try Protein.init(allocator, header.items, sequence.items);
@@ -615,6 +619,14 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                             myState = state.inHeader;
                             continue;
                         }
+                        // if there aren't any new sequence characters
+                        if (newlines_number == 2) {
+                            // only happens if the final character is a new line
+                            try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
+                            try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 31]);
+                            continue;
+                            
+                        }
                         if (newlines_index_left == 32) {
                             // in sequence and no newlines; just append to sequence
                             try sequence.appendSlice(allocator, buffer[i .. i + 32]);
@@ -632,13 +644,13 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                 }
             } else {
                 if (newsequences_index_left != 32) { // There is a new sequence
-                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + newlines_index_left]);
-                    try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
                     if (newlines_index_left == 32) { // newsequence without newline
                         try header.appendSlice(allocator, buffer[i .. i + 32]);
                         myState = state.inHeader;
                         continue;
                     }
+                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + newlines_index_left]);
+                    try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
                     myState = state.inSequence;
                 }
             }

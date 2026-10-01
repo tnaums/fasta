@@ -42,13 +42,13 @@ pub fn main(init: std.process.Init) !void {
 
                 if (myProtein.mass > massiest) {
                     massiest = myProtein.mass;
-//                    const printProtein = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myProtein});
-//                    defer init.gpa.free(printProtein);
-//                    try stdout.writeStreamingAll(init.io, printProtein);
                 }
+                const printProtein = try std.fmt.allocPrint(init.gpa, "{f}\n", .{myProtein});
+                defer init.gpa.free(printProtein);
+                try stdout.writeStreamingAll(init.io, printProtein);
             }
-            const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
-            const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
+            const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMicroseconds();
+            const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} μS\n", .{elapsed});
             defer init.gpa.free(elapsedPrint);
             try stdout.writeStreamingAll(init.io, elapsedPrint);
 
