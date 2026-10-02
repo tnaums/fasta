@@ -83,9 +83,14 @@ pub fn main(init: std.process.Init) !void {
 
                 try myDNA.addTranslation(init.gpa);
                 myDNA.printOrfs(init.gpa, 50);
-                try myDNA.mapDNA(init.gpa, init.io, stdout, fasta.readingframe.second);
+                try myDNA.mapDNA(init.gpa, init.io, stdout, fasta.readingframe.first);
 
                 try stdout.writeStreamingAll(init.io, "------------------------------------------------------------\n");
+                if (validateDNA(myDNA)) {
+                    std.debug.print("DNA sequence validated.\n", .{});
+                } else {
+                    std.debug.print("DNA sequence is invalid.\n", .{});
+                }
             }
             const elapsed = t_start.durationTo(std.Io.Timestamp.now(init.io, .awake)).toMilliseconds();
             const elapsedPrint = try std.fmt.allocPrint(init.gpa, "elapsed time: {d} mS\n", .{elapsed});
@@ -103,4 +108,47 @@ pub fn main(init: std.process.Init) !void {
     try stdout.writeStreamingAll(init.io, finalTally);
 
 
+
+}
+
+
+// This is a work in progress...
+fn validateDNA(dna: fasta.DNA) bool {
+    const VSize = std.simd.suggestVectorLength(u8).?;
+    const Vector = @Vector(VSize, u8);
+    const Bitmask = std.meta.Int(.unsigned, VSize);
+    
+    const adenines: Vector = @splat('A');
+    const cytosines: Vector = @splat('C');
+    const guanines: Vector = @splat('G');
+    const thymidines: Vector = @splat('T');
+
+    var i: usize = 0;
+    // 1. SIMD LOOP
+    while (i + VSize <= dna.sequence.len) : (i += VSize) {
+        const v: Vector = dna.sequence[i..][0..VSize].*;
+        const a = v == adenines;
+        const c = v == cytosines;
+        const g = v == guanines;
+        const t = v == thymidines;
+        
+        const maskA: Bitmask = @bitCast(a);
+        const maskC: Bitmask = @bitCast(c);
+        const maskG: Bitmask = @bitCast(g);
+        const maskT: Bitmask = @bitCast(t);
+        
+        const total = @popCount(maskA) + @popCount(maskC) + @popCount(maskG) + @popCount(maskT);
+        if (total != 32) return false;
+    }
+    // process remaining bytes
+    while (i < dna.sequence.len) : (i += 1) {
+        const a = dna.sequence[i] == 'A';
+        const c = dna.sequence[i] == 'C';
+        const g = dna.sequence[i] == 'G';
+        const t = dna.sequence[i] == 'T';
+        if (!(a or c or g or t)) {
+            return false;
+        }
+    }
+    return true;
 }
