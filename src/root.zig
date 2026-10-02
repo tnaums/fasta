@@ -496,12 +496,11 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
     var myState: ?state = null;
 
     var vcounter: u32 = 0;
-//    std.debug.print("Starting function with SIMD.\n", .{});
 
     // 64KB buffer for high throughput
     var buffer: [64 * 1024]u8 = undefined;
     // SIMD Configuration
-    const VSize = 32;
+    const VSize = std.simd.suggestVectorLength(u8).?;
     const Vector = @Vector(VSize, u8);
     const nl: Vector = @splat('\n');
     const ns: Vector = @splat('>');
@@ -510,7 +509,7 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
     var sequence: std.ArrayList(u8) = .empty;
     defer header.deinit(allocator);
     defer sequence.deinit(allocator);
-    const Bitmask = std.meta.Int(.unsigned, 32);
+    const Bitmask = std.meta.Int(.unsigned, VSize);
 
     while (true) {
         const n = file.readStreaming(io, &.{&buffer}) catch |err| {
@@ -547,11 +546,11 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                         if (newlines_index_left != 0) {
                             try header.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
                         }
-                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + VSize]);
                         myState = state.inSequence;
                     },
                     .inSequence => {
-                        if (newsequences_index_left != 32) { // found a new sequence
+                        if (newsequences_index_left != VSize) { // found a new sequence
                             if (newlines_number == 3) {
                                 const newlines_index_right = @clz(mask2); // matches right-most '\n'
                                 try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
@@ -563,8 +562,8 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
 
                                 header.clearRetainingCapacity();
                                 sequence.clearRetainingCapacity();
-                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 31 - newlines_index_right]);
-                                try sequence.appendSlice(allocator, buffer[i + 32 - newlines_index_right .. i + 32]);
+                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + VSize - 1 - newlines_index_right]);
+                                try sequence.appendSlice(allocator, buffer[i + VSize - newlines_index_right .. i + VSize]);
                                 continue;
                             }
                             if (newlines_number == 2) {
@@ -578,8 +577,8 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                                     header.clearRetainingCapacity();
                                     sequence.clearRetainingCapacity();
 
-                                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 31 - newlines_index_right]);
-                                    try sequence.appendSlice(allocator, buffer[i + 32 - newlines_index_right .. i + 32]);
+                                    try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + VSize - 1 - newlines_index_right]);
+                                    try sequence.appendSlice(allocator, buffer[i + VSize - newlines_index_right .. i + VSize]);
                                     continue;
                                 }
                                 try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
@@ -590,7 +589,7 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                                 header.clearRetainingCapacity();
                                 sequence.clearRetainingCapacity();
 
-                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 32]);
+                                try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + VSize]);
                                 myState = state.inHeader;
                                 continue;
                             } // end of nelines_number == 2
@@ -604,7 +603,7 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                                 sequence.clearRetainingCapacity();
 
                                 try header.appendSlice(allocator, buffer[i + 1 .. i + newlines_index_left]);
-                                try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                                try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + VSize]);
                                 continue;
                             }
                             // start with sequence and ends in header; sequence\n>startOfHeader
@@ -615,7 +614,7 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                             header.clearRetainingCapacity();
                             sequence.clearRetainingCapacity();
 
-                            try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + 32]);
+                            try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + VSize]);
                             myState = state.inHeader;
                             continue;
                         }
@@ -623,34 +622,34 @@ pub fn parseProteinSIMD(io: std.Io, allocator: std.mem.Allocator, queue: *std.Io
                         if (newlines_number == 2) {
                             // only happens if the final character is a new line
                             try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
-                            try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 31]);
+                            try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + VSize - 1]);
                             continue;
                             
                         }
-                        if (newlines_index_left == 32) {
+                        if (newlines_index_left == VSize) {
                             // in sequence and no newlines; just append to sequence
-                            try sequence.appendSlice(allocator, buffer[i .. i + 32]);
+                            try sequence.appendSlice(allocator, buffer[i .. i + VSize]);
                             continue;
                         }
                         if (newlines_index_left == 0) {
                             // first character is \n, just append the rest
-                            try sequence.appendSlice(allocator, buffer[i + 1 .. i + 32]);
+                            try sequence.appendSlice(allocator, buffer[i + 1 .. i + VSize]);
                             continue;
                         }
                         // single internal newline, append either side to sequence
                         try sequence.appendSlice(allocator, buffer[i .. i + newlines_index_left]);
-                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                        try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + VSize]);
                     },
                 }
             } else {
-                if (newsequences_index_left != 32) { // There is a new sequence
-                    if (newlines_index_left == 32) { // newsequence without newline
-                        try header.appendSlice(allocator, buffer[i .. i + 32]);
+                if (newsequences_index_left != VSize) { // There is a new sequence
+                    if (newlines_index_left == VSize) { // newsequence without newline
+                        try header.appendSlice(allocator, buffer[i .. i + VSize]);
                         myState = state.inHeader;
                         continue;
                     }
                     try header.appendSlice(allocator, buffer[i + newsequences_index_left + 1 .. i + newlines_index_left]);
-                    try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + 32]);
+                    try sequence.appendSlice(allocator, buffer[i + newlines_index_left + 1 .. i + VSize]);
                     myState = state.inSequence;
                 }
             }
